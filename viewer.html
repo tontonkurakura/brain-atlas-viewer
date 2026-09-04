@@ -813,9 +813,30 @@ function ghostAtlas(){
   return !!(ATLASES[state.atlas] && ATLASES[state.atlas].focusGhost);
 }
 
+/* 選択外を灰色に潰すか。**ネットワークだけ。**7 つの塊はどれも強い色を持って
+   いるので、薄くしただけでは選んだ 1 つが他の 6 つに埋もれる。色を捨てれば、
+   色が付いているのは選んだネットワークだけになる（トラクトの背景と同じ考え方）。
+   機能的領域（360 区分）には掛けない——あちらは隣の区分との位置関係で読むので、
+   周りの色が消えると手掛かりごと消える。 */
+function greyAtlas(){
+  return !!(ATLASES[state.atlas] && ATLASES[state.atlas].focusGrey);
+}
+
+/* **濃さはアトラスごとに覚える。**機能的領域は脳溝の内側や内側面の区分を
+   透かして見つけるので薄く（20%）、ネットワークは脳の形を残したまま塊を
+   目立たせたいので濃い（75%）。同じ値を共有すると、系統を切り替えるたびに
+   どちらかが使いものにならない。利用者がつまみを動かしたら、その値を
+   そのアトラスのものとして覚える。 */
+const ghostBy = new Map();
+function ghostOf(a){
+  if (!ghostBy.has(a))
+    ghostBy.set(a, (ATLASES[a] && ATLASES[a].ghostDefault) ?? GHOST_DEFAULT);
+  return ghostBy.get(a);
+}
+
 const state = { plane: (Q.get('plane')||'axial'), mode: (Q.get('mode')||'slice'),
                 atlas: (Q.get('atlas')||'macro'), side:'L',
-                ghost:GHOST_DEFAULT,               // 選択していない領域の不透明度
+                ghost:GHOST_DEFAULT,               // 選択していない領域の不透明度（ghostBy が持ち主）
                 half:'both', scope:'all',          // 立体モードの見せ方
                 overlay:true, cut:true,            // 重ね方（操作子の状態）
                 world:{x:0,y:0,z:0}, clip:true };  // clip は cut の実効値
@@ -857,7 +878,7 @@ const ATLASES = {
      モデル・別の断面画像で、DMN なら DMN が 1 つの塊・1 つの色で出る。
      畳まずに色だけ揃えると、塊の内側に 360 区分の境界が残る（マクロと同じ理屈）。 */
   glasser: { name:'機能的領域', model:'brain_glasser.glb', focusGhost:true,
-             pair:'network', pairLabel:['解剖','ネットワーク'],
+             pair:'network', pairLabel:['皮質区分','ネットワーク'],
              groups:[
                '一次視覚野','早期視覚野','背側視覚路','腹側視覚路','MT+ 複合体',
                '体性感覚・運動野','中心傍小葉・中部帯状回','運動前野','後弁蓋部',
@@ -868,8 +889,8 @@ const ATLASES = {
   /* ネットワーク。アトラスのボタンには出さない（機能的領域の「系統」から入る）。
      配色は Yeo 2011 の慣例に合わせてあるので、色だけで読める。 */
   network: { name:'機能的領域（ネットワーク）', model:'brain_network.glb',
-             hidden:true, focusGhost:true,
-             pair:'glasser', pairLabel:['解剖','ネットワーク'], pairOn:1,
+             hidden:true, focusGhost:true, focusGrey:true, ghostDefault:0.75,
+             pair:'glasser', pairLabel:['皮質区分','ネットワーク'], pairOn:1,
              groups:['ネットワーク', ...GLASSER_SUB] },
   /* 白質線維。**このアトラスだけ性質が違う。**
      - 線維束は重なるのでラベルボリュームが無い。断面は解剖（DKT）のものを流用し、
@@ -896,6 +917,11 @@ const ATLASES = {
    初期化の順が少し変わるだけで TDZ に落ちて、読み込みが 0% のまま黙って止まる。
    同じことを一度踏んでいる（DECISIONS の「モジュール内の const」）。 */
 function labelAtlasOf(a){ return (ATLASES[a] && ATLASES[a].labelAtlas) || a; }
+
+/* 最初のアトラスにも濃さを効かせる。**ATLASES より後で呼ぶこと。**
+   `ghostOf` は ATLASES を読むので、前に置くと TDZ に落ちて読み込みが黙って止まる。
+   `setAtlas` にだけ書くと、`?atlas=network` で開いた経路で既定のままになる。 */
+state.ghost = ghostOf(state.atlas);
 
 /* 対になるアトラス（機能的領域 ⇄ ネットワーク）。**並べ替えではなく入れ替え。**
    実体が別（別のモデル・別の断面画像）なので、setAtlas に任せる。 */
@@ -1057,6 +1083,10 @@ const GHOST_COLOR = 0xaebdd6;
    0.42 では束が完全に隠れ、0.16 では形が読めず、0.10 で形がはっきり出た。
    選択の透かし（`state.ghost`）とは役割が違うので、同じつまみに繋がない。 */
 const GHOST_OPACITY = 0.10;
+/* ネットワークで選択外を潰す灰色。**色オブジェクトで持つ。**`setHex().multiplyScalar()`
+   だと sRGB からの変換が挟まるので、`getHex()` で読み返しても同じ値にならず、
+   検査から見分けが付かない。 */
+const GREY_OFF = new THREE.Color(GHOST_COLOR).multiplyScalar(0.55);
 let backdropAtlas = null;
 
 function setBackdrop(atlas){
@@ -1324,6 +1354,7 @@ document.getElementById('flip').onclick = ()=>{ clipSide = -clipSide; applyClip(
 const ghostEl = document.getElementById('ghost');
 ghostEl.oninput = () => {
   state.ghost = +ghostEl.value / 100;
+  ghostBy.set(state.atlas, state.ghost);      // そのアトラスの値として覚える
   document.getElementById('gv').textContent = ghostEl.value + '%';
   applyFocus();
 };
@@ -1390,12 +1421,17 @@ function applyFocus(){
      断面モードでは掛けない。あちらは切り口に色が出るので、この問題が起きない。 */
   /* 濃さ 100% は透かさない（元の「暗く落とすだけ」に戻る）。0% は消す。 */
   const ghost = ghostAtlas() && sel.size > 0 && state.mode === 'solid' && state.ghost < 1;
+  /* ネットワークでは、選択外は薄くするだけでなく**色を捨てて灰色に潰す**。
+     7 つの塊はどれも強い色なので、薄いままだと選んだ 1 つが他の 6 つに埋もれる。
+     灰色にすれば脳の形は残り、色が付いているのは選んだ塊だけになる。 */
+  const grey = greyAtlas() && sel.size > 0 && state.mode === 'solid';
   for (const [n, o] of meshByName) {
     const m = o.material;
     if (!m.userData.base) m.userData.base = m.color.clone();
     m.color.copy(m.userData.base);
     const off = sel.size && !sel.has(n);
-    if (off) m.color.multiplyScalar(ghost ? .75 : .3);
+    if (off && grey) m.color.copy(GREY_OFF);
+    else if (off) m.color.multiplyScalar(ghost ? .75 : .3);
     /* 透かすときは色を落としすぎない。不透明度で既に暗くなるので、
        両方掛けると輪郭まで消えて脳の形が分からなくなる。 */
     /* **FrontSide にする。**皮質・皮質下・小脳は入れ子なので、DoubleSide のまま
@@ -1403,7 +1439,10 @@ function applyFocus(){
        トラクトの背景で同じことを踏んでいる（DECISIONS 36）。 */
     m.transparent = !!(off && ghost);
     m.opacity = (off && ghost) ? state.ghost : 1;
-    m.depthWrite = !(off && ghost);
+    /* **灰色に潰す側は深度を書く。**脳の形を残すのが目的なので、奥のものが
+       透けて重なると輪郭が溶ける。透かして探す機能的領域のほうは書かない
+       （書くと手前の区分に隠れて、選んだものが見えない）。 */
+    m.depthWrite = !(off && ghost) || grey;
     m.side = (off && ghost) ? THREE.FrontSide : THREE.DoubleSide;
     m.needsUpdate = true;
   }
@@ -1591,6 +1630,7 @@ async function setAtlas(a){
 
   clearSelection(); setHover(null);
   state.atlas = a;
+  state.ghost = ghostOf(a);         // 濃さはアトラスごと。前のものを持ち込まない
   syncAtlasUI();
   buildGrouping();
   /* 立体だけのアトラス（トラクトグラフィー）へ入るときは立体に寄せる。
@@ -2448,6 +2488,11 @@ window.__state = () => ({
   ghost: state.ghost,
   /* 選んでいない領域のうち、透かしているものの数。立体モードで選択中だけ立つ。
      断面モードでは切り口に色が出るので掛けない。 */
+  /* 選択外を灰色に潰した数。**ネットワークだけ。**色が残っていると、選んだ塊が
+     他の 6 つに埋もれて「どこがそのネットワークか」が読めない。 */
+  greyedOff: meshByName
+    ? [...meshByName].filter(([n, o]) => !sel.has(n) && o.material.color.equals(GREY_OFF)).length
+    : 0,
   focusGhost: meshByName
     ? [...meshByName].filter(([n, o]) => !sel.has(n) && o.material.opacity < 1).length : 0,
   camDist: +camera.position.distanceTo(controls.target).toFixed(2),
