@@ -123,18 +123,10 @@
   .tip .ja .sw{width:14px;height:14px;border-radius:4px}
   .tip .en{font-size:13px;color:#9ab0df;margin-top:3px}
   .tip .gp{font-size:12px;color:#8b9dc0;margin-top:7px}
-  /* 繋ぐ皮質領域。数が多いので折り返し、高さを抑えて溢れたら中でスクロールする。
-     パネルは脳の上に並ぶので、伸びると脳を覆う。 */
-  /* **幅を明示する。**パネルの幅は中身のいちばん長い行で決まるので、名前を
-     並べただけだと横に伸びきり、帯に収まらず「詰めた表示」に落ちて名前ごと
-     消える（実際にそうなった）。折り返す幅をここで決める。 */
-  .tip .cn{font-size:11px;color:#9ab0df;margin-top:7px;line-height:1.5;
-    white-space:normal;max-width:230px;max-height:66px;overflow:auto}
-  .tip .cn b{display:block;color:#8b9dc0;font-weight:600;margin-bottom:2px}
   /* 選択のパネルは領域ごとに 1 枚で、脳の上に横へ並べる。並びきらないときは
      この順で削る: 英語名と大分類を落とす -> 名前を小さくする。 */
-  .tip.c1 .en,.tip.c1 .gp,.tip.c1 .cn,
-  .tip.c2 .en,.tip.c2 .gp,.tip.c2 .cn{display:none}
+  .tip.c1 .en,.tip.c1 .gp,
+  .tip.c2 .en,.tip.c2 .gp{display:none}
   .tip.c2{white-space:normal}          /* ここまで詰めたら、長い名前は折り返す */
   .tip.c2 .ja{font-size:15px;gap:7px}
   .tip.c2 .ja .sw{width:11px;height:11px}
@@ -287,11 +279,6 @@
   <div id="ghostBlock">
     <div class="lbl row"><span>選択外の濃さ</span><span class="val" id="gv">20%</span></div>
     <input type="range" id="ghost" min="0" max="100" step="1" value="20">
-  </div>
-
-  <!-- 繋ぐ皮質領域の名前。トラクトグラフィーでだけ出る -->
-  <div class="seg" id="cConnRow" style="display:none">
-    <button id="cConn" class="on">繋ぐ領域の名前</button>
   </div>
   </div>
 </div>
@@ -828,7 +815,6 @@ function ghostAtlas(){
 
 const state = { plane: (Q.get('plane')||'axial'), mode: (Q.get('mode')||'slice'),
                 atlas: (Q.get('atlas')||'macro'), side:'L',
-                conn:true,                         // 繋ぐ領域の名前をパネルに出すか
                 ghost:GHOST_DEFAULT,               // 選択していない領域の不透明度
                 half:'both', scope:'all',          // 立体モードの見せ方
                 overlay:true, cut:true,            // 重ね方（操作子の状態）
@@ -893,11 +879,12 @@ const ATLASES = {
   /* トラクトグラフィーは立体だけ。断面は出さない（線維は断面に色を持たないので、
      切っても切り口に何も出ず、板が邪魔になるだけ）。背景に解剖のモデルを
      薄く出して、選んだトラクトを不透明でその上に重ねる。 */
-  /* 背景は Glasser にする。**マクロではない。**繋がる皮質領域を光らせるとき、
-     背景と光らせる面が同じメッシュでないと、同じ場所に 2 枚の面が重なって
-     描画順が定まらない。同じモデルの中で「薄いか濃いか」を切り替えれば起きない。 */
+  /* 背景はマクロ。**既定のアトラスなので、たいていもう読んである。**背景は色を
+     捨てて灰色に潰すから、区分の細かさは見た目に出ない。Glasser を借りていた
+     時期があるが、あれは繋ぎ先の皮質を同じモデルの中で濃く塗るためで、その機能を
+     外したいまは 8.8MB を余分に読むだけになる（docs/archive/tract-connects.md）。 */
   tract: { name:'トラクトグラフィー', model:'brain_tract.glb', tracts:true,
-           solidOnly:true, backdrop:'glasser', labelAtlas:'dkt',
+           solidOnly:true, backdrop:'macro', labelAtlas:'dkt',
            groups:['連合線維','投射線維','交連線維','小脳','脳神経'] },
 };
 
@@ -1013,6 +1000,22 @@ async function ensureModel(atlas){
   const m = { root: gltf.scene, meshByName: new Map(), mats: [] };
   const tr = !!(ATLASES[atlas] && ATLASES[atlas].tracts);
   m.root.traverse(o=>{
+    /* **白質線維だけ面ではなく線で持っている**（brainslice/streamlines.py が
+       streamline をそのまま glTF の LINES で書く）。線には面が無いので陰影が
+       付かない。色をそのまま出す LineBasicMaterial にして、他は面と同じに扱う
+       （meshByName に入れる・トラクトは既定で隠す・クリップ平面を渡す）。 */
+    if (o.isLine) {
+      const c = o.material && o.material.color;
+      o.material = new THREE.LineBasicMaterial({
+        color: c ? c.clone() : new THREE.Color(0xaabbcc),
+        clippingPlanes: state.clip ? [clip] : [],
+        transparent:false, opacity:1
+      });
+      if (tr) o.visible = false;
+      m.mats.push(o.material);
+      if (o.name) m.meshByName.set(o.name, o);
+      return;
+    }
     if(!o.isMesh) return;
     const src = o.material;
     /* transparent:true にすると three.js は不透明でも半透明キューに回し、
@@ -1046,16 +1049,14 @@ async function ensureModel(atlas){
    モデルは models に持っているものをそのまま借りる。マテリアルを書き換えるので、
    **借りるのをやめるときに必ず戻す。**戻さないと、次にそのアトラスを選んだとき
    脳全体が半透明のままになる。 */
-const CONNECT_OPACITY = 0.50;    // 繋ぎ先の皮質。地の 0.10 とトラクトの 1.0 の中間
-/* **地の脳は色を捨てて灰色にする。**背景に使う Glasser は 360 色を持っているので、
-   そのまま薄くすると色のまだらになり、トラクトと繋ぎ先のコントラストを食う。
-   色が付いているのは「選んだトラクト」と「その繋ぎ先」だけ、という状態にする。 */
+/* **地の脳は色を捨てて灰色にする。**そのまま薄くすると領域の色がまだらに残り、
+   トラクトとのコントラストを食う。色が付いているのは「選んだトラクト」だけ、
+   という状態にする。 */
 const GHOST_COLOR = 0xaebdd6;
 /* トラクトの背景。**こちらは動かさない。**弓状束を出して見比べて決めた値で、
    0.42 では束が完全に隠れ、0.16 では形が読めず、0.10 で形がはっきり出た。
    選択の透かし（`state.ghost`）とは役割が違うので、同じつまみに繋がない。 */
 const GHOST_OPACITY = 0.10;
-const tmpCol = new THREE.Color(), tmpHSL = { h: 0, s: 0, l: 0 };
 let backdropAtlas = null;
 
 function setBackdrop(atlas){
@@ -1084,48 +1085,6 @@ function setBackdrop(atlas){
   m.root.visible = true;
   m.root.traverse(o => { if (o.isMesh) o.visible = true; });
   backdropAtlas = atlas;
-}
-
-/* 選んだトラクトが繋ぐ皮質領域を、そのトラクトの色で濃く塗る。
-   背景の中の一部を濃くするだけなので、面が重ならない。
-
-   色をトラクトに合わせるのは、3 本まで選べるから。領域の元の色で塗ると、
-   どのトラクトの繋ぎ先なのかが分からない。2 本が同じ領域へ繋ぐときは、
-   先に選んだほうの色にする（`sel` は押した順に入っている）。 */
-function paintConnections(){
-  const bd = backdropAtlas && models.get(backdropAtlas);
-  if (!bd) return;
-  const want = new Map();
-  for (const n of sel) {
-    const v = labels[n];
-    if (!v || !v.connects) continue;
-    for (const r of v.connects) if (!want.has(r)) want.set(r, v.color);
-  }
-  for (const [name, o] of bd.meshByName) {
-    const x = o.material;
-    if (!x.userData.base) x.userData.base = x.color.clone();
-    const c = want.get(name);
-    if (c) {
-      /* **トラクトと同じ色にしない。**同じ色だと、皮質の斑とトラクト本体が
-         一続きに見えて、線維がどこを走っているのか読めない。色相を半周（180°）
-         回して明るくする。どのトラクトの繋ぎ先かは色相の対応で追える。 */
-      tmpCol.setRGB(c[0] / 255, c[1] / 255, c[2] / 255).getHSL(tmpHSL);
-      x.color.setHSL((tmpHSL.h + 0.5) % 1,
-                     Math.min(1, tmpHSL.s * 1.05),
-                     Math.min(0.76, tmpHSL.l + 0.18));
-      /* **繋ぎ先は不透明にしない。**皮質は白質より手前にあるので、不透明に
-         すると中を走るトラクトが隠れる。トラクト本体（不透明）と地の脳（0.10）の
-         中間の濃さにして、繋ぎ先だと分かりつつトラクトが透けて見えるようにする。 */
-      x.transparent = true; x.opacity = CONNECT_OPACITY; x.depthWrite = false;
-      x.side = THREE.FrontSide;
-    } else {
-      x.color.setHex(GHOST_COLOR);
-      x.transparent = true; x.opacity = GHOST_OPACITY; x.depthWrite = false;
-      x.side = THREE.FrontSide;
-    }
-    x.needsUpdate = true;
-  }
-  return want.size;
 }
 
 function useModel(atlas){
@@ -1335,9 +1294,6 @@ function applyMode(){
   document.getElementById('scope').style.display = hasScope ? '' : 'none';
   document.querySelectorAll('#scope button').forEach(
     b => b.classList.toggle('on', b.dataset.s === state.scope));
-  /* 繋ぐ領域を持つのはトラクトグラフィーだけ */
-  const isTract = !!(ATLASES[state.atlas] && ATLASES[state.atlas].tracts);
-  document.getElementById('cConnRow').style.display = isTract ? '' : 'none';
 
   syncGhostUI();
   sliceMesh.visible = !solid && uiReady && !!lblData;
@@ -1372,17 +1328,6 @@ ghostEl.oninput = () => {
   applyFocus();
 };
 
-/* 繋ぐ領域の名前を出すかどうか。名前だけの切り替えで、3D の色付けは常に出す
-   （色が付いているのに名前が無い、の逆はあってよいが、色まで消すと
-   「繋ぐ領域を出す」という機能そのものが消えて見える）。 */
-const cConnBtn = document.getElementById('cConn');
-cConnBtn.onclick = () => {
-  state.conn = !state.conn;
-  cConnBtn.classList.toggle('on', state.conn);
-  invalidatePanels();
-  layoutCallouts();
-};
-
 /* ───────────── 左の領域リスト ─────────────
    大分類 -> 小区分。選ぶとその領域を強調し、その領域の代表スライスへ移動する。
 
@@ -1412,12 +1357,10 @@ const itemByName = new Map();
 function paint(name){
   const m = meshByName.get(name);
   if (!m) return;
-  // 線維は「出ている＝選ばれている」なので、光らせる必要が無い
-  if (ATLASES[state.atlas] && ATLASES[state.atlas].tracts) {
-    m.material.emissive.setHex(0x000000);
-    m.material.emissiveIntensity = 1;
-    return;
-  }
+  /* 線維は「出ている＝選ばれている」なので、光らせる必要が無い。
+     **線のマテリアルには emissive が無い**（LineBasicMaterial）。触ると
+     undefined の setHex で落ちる。 */
+  if (ATLASES[state.atlas] && ATLASES[state.atlas].tracts) return;
   if (sel.has(name)) {
     m.material.emissive.copy(m.material.color).multiplyScalar(.55);
   } else {
@@ -1437,7 +1380,6 @@ function applyFocus(){
      必要も無い（そもそも出ていない）。 */
   if (ATLASES[state.atlas] && ATLASES[state.atlas].tracts) {
     for (const [n, o] of meshByName) o.visible = sel.has(n);
-    paintConnections();
     return;
   }
   /* 選んだものを目立たせるには、そこを明るくするより周りを落とすほうが効く。
@@ -1720,6 +1662,10 @@ addEventListener('keydown', e => {
    どちらで当たっても対応する 3D 領域を光らせる。断面上をなぞると 3D 側が
    光るので、2 つの表示が同じものを指していることが目で分かる。 */
 const ray = new THREE.Raycaster();
+/* **線の当たり判定は既定 1mm。**白質線維は太さゼロの線なので、素だとホバーで
+   ほとんど拾えない。world RAS のミリ座標なので、この数字はそのまま「線から
+   何 mm 離れていても拾うか」を意味する。 */
+ray.params.Line.threshold = 2.5;
 const ndc = new THREE.Vector2();
 const leadEl = document.getElementById('lead');
 const dotEl = document.getElementById('leaddot');
@@ -1938,35 +1884,15 @@ function rowHTML(name){
   const v = labels[name];
   if (!v) return '';
   const c = v.color ? `rgb(${v.color.join(',')})` : '#888';
-  /* 繋ぐ皮質領域の名前。Glasser の略号のまま並べる（V1・44 など、文献でも
-     訳さずに使う）。**多いので折り返して高さを抑える。**弓状束で 27 領域あり、
-     全部を 1 行ずつ出すとパネルが脳を覆う。 */
-  let cn = '';
-  if (state.conn && v.connects && v.connects.length) {
-    const names = v.connects.map(r => (labels[r] && labels[r].ja_short) || r).join('・');
-    cn = `<div class="cn"><b>繋ぐ領域 ${v.connects.length}</b>${names}</div>`;
-  }
   return `<div class="srow" data-name="${name}">` +
          `<div class="ja"><span class="sw" style="background:${c}"></span>${v.ja}</div>` +
          `<div class="en">${v.en}</div>` +
          (v.group ? `<div class="gp">${v.group}</div>` : '') +
-         cn +
          `</div>`;
 }
 
 function fillTip(el, name){
   if (labels[name]) el.innerHTML = rowHTML(name);
-}
-
-/* パネルの中身は「名前が変わったときだけ」書き換える作りなので、中身の**形**が
-   変わったとき（繋ぐ領域の名前を出す・出さない）は印を消して作り直させる。
-   消さないと、切り替えても中身が古いまま残る。
-
-   **アロー関数（const）ではなく function で書く。**呼ぶ側（操作子の設定）は
-   selPanels の宣言より前の行にある。 */
-function invalidatePanels(){
-  for (const el of selPanels) el.dataset.name = '';
-  tipH.dataset.name = '';
 }
 
 function setLine(ls, x1, y1, x2, y2){
@@ -2239,11 +2165,17 @@ function occludedByModel(sliceHit){
    クリップで消えたメッシュに当たるためだった）。 */
 function pickModel(){
   if (!brain || !brain.visible) return null;
-  /* `visible` で自分で絞る。Raycaster は見た目を知らないので、
-     半割で消した側や隠した皮質にもそのまま当たる。 */
-  for (const h of ray.intersectObject(brain, true)) {
+  /* `visible` で自分で絞る。Raycaster は見た目を知らないので、半割で消した側や
+     隠した皮質にもそのまま当たる。
+
+     **当ててから捨てるのではなく、見えているものだけに当てる。**白質線維は
+     87 本 × 約 6000 線分あり、既定では 3 本しか出ていない。当ててから捨てると
+     隠れている 84 本ぶんの線分も毎フレーム測ることになる。 */
+  const live = [];
+  for (const [, o] of meshByName) if (o.visible) live.push(o);
+  for (const h of ray.intersectObjects(live, false)) {
     const name = h.object.name;
-    if (!h.object.visible || !name || !meshByName.get(name)) continue;
+    if (!name || !meshByName.get(name)) continue;
     return (!labels[name] || NO_PANEL.has(name)) ? null : name;
   }
   return null;
@@ -2455,6 +2387,11 @@ window.__ghost = (opt = {}) => {
 };
 
 /* 実測用の口 */
+/* 画面の 1 点が指している領域名。ホバーとタップが使うのと同じ経路。
+   **線は太さゼロ**なので、ここが拾えるかどうかが `ray.params.Line.threshold`
+   の検査になる（白質線維はホバーのパネルが出ない——出ている線は選択済みで、
+   選択済みのものにはホバーのパネルを出さない決まりだから）。 */
+window.__pick = (x, y) => pickAt(x, y);
 window.__labels = () => labels;
 window.__meshes = () => meshByName;
 
@@ -2519,22 +2456,9 @@ window.__state = () => ({
      戻し忘れると、次にそのアトラスを選んだとき脳全体が半透明のままになる。
      戻したことを数で確かめられるようにしておく。 */
   backdrop: backdropAtlas,
-  /* 繋ぎ先の色が、トラクト本体の色と違っていること。同じ色だと皮質の斑と
-     束が一続きに見えて、線維の走行が読めない（実際にそう見えた）。 */
-  connectDistinct: (() => {
-    const bd = backdropAtlas && models.get(backdropAtlas);
-    if (!bd) return true;
-    const mine = new Set([...sel].map(n => (labels[n].color || []).join(',')));
-    for (const [, o] of bd.meshByName) {
-      if (o.material.opacity <= GHOST_OPACITY + 1e-6) continue;
-      const c = o.material.color;
-      const k = [c.r, c.g, c.b].map(v => Math.round(v * 255)).join(',');
-      if (mine.has(k)) return false;
-    }
-    return true;
-  })(),
-  // 繋ぎ先として濃く塗っている領域の数（選んだトラクトの合計、重複は 1 つ）
-  connected: (() => {
+  /* 背景に濃く塗った面が無いこと。繋ぐ皮質領域を一緒に出す機能を外したので、
+     色が付いているのは選んだトラクトだけ（docs/archive/tract-connects.md）。 */
+  backdropPainted: (() => {
     const bd = backdropAtlas && models.get(backdropAtlas);
     if (!bd) return 0;
     let n = 0;
@@ -2548,6 +2472,15 @@ window.__state = () => ({
                                    return !o || o.material.transparent === false; }),
   clip: state.clip, sliceVisible: sliceMesh.visible, world: { ...state.world },
   nodes: meshByName.size, models: [...models.keys()],
+  /* 幾何の種類。**白質線維だけ線**（brainslice/streamlines.py）。面に戻ると
+     走行が消えて「そういう形の塊」に見えるので、型そのものを検査する。 */
+  geomKind: (() => {
+    const v = [...meshByName.values()];
+    if (!v.length) return 'none';
+    if (v.every(o => o.isLine)) return 'line';
+    if (v.every(o => o.isMesh)) return 'mesh';
+    return 'mixed';
+  })(),
   labelSrc: labMat.map && labMat.map.userData.src,   // 実際に貼っている板
   t1Src: t1Mat.map && t1Mat.map.userData.src,
 });
@@ -2569,7 +2502,9 @@ atlasReady.then(()=>{
   controls.update();
   updateHover();
   layoutCallouts();
-  if (sel.size) {                       // 選択中の領域だけ明るさを揺らす
+  /* 選択中の領域だけ明るさを揺らす。**白質線維には掛けない**——線には
+     emissive が無く、そもそも「出ている＝選ばれている」で見分けが付く。 */
+  if (sel.size && !(ATLASES[state.atlas] && ATLASES[state.atlas].tracts)) {
     const k = 1.1 + .5 * Math.sin(performance.now() / 380);
     for (const n of sel) {
       const m = meshByName.get(n);
