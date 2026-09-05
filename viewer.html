@@ -377,38 +377,69 @@
       <li>表示している MRI は、公開されている標準脳（MNI152）です。</li>
       <li>領域の区分は自動処理（FastSurfer）の結果で、個々の症例に当てはまるものではありません。</li>
       <li>機能的領域（Glasser）は標準脳の表面へ写したもので、個人の機能局在ではありません。</li>
+      <li>白質線維は 1065 例の平均から作られた標準的な走行で、個人の線維でも、
+          その人に同じ線維があることの保証でもありません。</li>
       <li>左右の向きは neurological（画像の左が患者の左）です。</li>
     </ul>
 
     <h3>データと出典</h3>
     <table>
       <tr><th>MRI（標準脳）</th>
-          <td>MNI152（Connectome Workbench 由来の平均脳）<br>各配布元の条件に従います</td></tr>
+          <td>MNI 空間の平均脳（Connectome Workbench が書き出した頭蓋剥離済みの画像）<br>
+              Human Connectome Project 由来のものとして、
+              <a href="https://www.humanconnectome.org/study/hcp-young-adult/document/wu-minn-hcp-consortium-open-access-data-use-terms"
+                 target="_blank" rel="noopener noreferrer">WU-Minn HCP Open Access Data Use Terms</a>
+              に従って再配布しています</td></tr>
       <tr><th>解剖学領域</th>
-          <td>DKT 分割（FreeSurfer / FastSurfer）。マクロはこれを脳葉などへまとめたもの<br>
-              各配布元の条件に従います</td></tr>
+          <td>DKT 分割。区分の推定は
+              <a href="https://github.com/Deep-MI/FastSurfer" target="_blank"
+                 rel="noopener noreferrer">FastSurfer</a>（Apache License 2.0）、
+              定義は <a href="https://doi.org/10.3389/fnins.2012.00171" target="_blank"
+                 rel="noopener noreferrer">Klein &amp; Tourville 2012</a><br>
+              <a href="https://surfer.nmr.mgh.harvard.edu/fswiki/FreeSurferSoftwareLicense"
+                 target="_blank" rel="noopener noreferrer">FreeSurfer Software License</a>
+              （研究目的。臨床応用は推奨されていません）<br>
+              マクロはこれを脳葉などへまとめたものです</td></tr>
       <tr><th>機能的領域</th>
           <td><a href="https://doi.org/10.1038/nature18933" target="_blank"
                  rel="noopener noreferrer">HCP-MMP1</a>（Glasser 分割・180 領域 × 左右）<br>
+              区分そのものは WU-Minn HCP Open Access Data Use Terms<br>
               表面版は <a href="https://doi.org/10.6084/m9.figshare.3498446" target="_blank"
-                 rel="noopener noreferrer">fsaverage への投影</a>（Mills K, 2016）<br>
-              各配布元の条件に従います</td></tr>
+                 rel="noopener noreferrer">fsaverage への投影</a>（Mills K, 2016）・
+              <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank"
+                 rel="noopener noreferrer">CC BY 4.0</a></td></tr>
       <tr><th>血管支配領域</th>
           <td><a href="https://github.com/Chin-Fu-Liu/Arterial_Atlas" target="_blank"
                  rel="noopener noreferrer">JHU Arterial Atlas</a>（Level 1・32 領域）<br>
               <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank"
                  rel="noopener noreferrer">CC BY-SA 4.0</a></td></tr>
+      <tr><th>トラクトグラフィー</th>
+          <td><a href="https://brain.labsolver.org/hcp_trk_atlas.html" target="_blank"
+                 rel="noopener noreferrer">HCP1065 Tractography Atlas</a>（Yeh 2022・87 本）<br>
+              <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank"
+                 rel="noopener noreferrer">CC BY-SA 4.0</a>。
+              HCP 由来のため上記 Data Use Terms の謝辞も必要です</td></tr>
       <tr><th>3D 描画</th>
           <td><a href="https://threejs.org/" target="_blank"
                  rel="noopener noreferrer">three.js</a> r163（同梱・無改変）<br>MIT License</td></tr>
     </table>
     <p class="cite">
-      血管支配領域の断面画像と 3D モデルは JHU Arterial Atlas から派生したもので、
-      CC BY-SA 4.0 が継承されます。<br>
+      <b>継承されるライセンス。</b>血管支配領域の断面画像と 3D モデルは JHU Arterial Atlas から、
+      トラクトグラフィーの 3D モデルは HCP1065 Tractography Atlas から派生したもので、
+      どちらも CC BY-SA 4.0 が継承されます。<br><br>
+      <b>Human Connectome Project の謝辞。</b>
+      Data were provided [in part] by the Human Connectome Project, WU-Minn Consortium
+      (Principal Investigators: David Van Essen and Kamil Ugurbil; 1U54MH091657) funded by
+      the 16 NIH Institutes and Centers that support the NIH Blueprint for Neuroscience Research;
+      and by the McDonnell Center for Systems Neuroscience at Washington University.<br><br>
       Liu C-F, et al. <i>Digital 3D Brain MRI Arterial Territories Atlas.</i>
       Scientific Data 10, 74 (2023). © 2021 The Johns Hopkins University<br>
       Glasser MF, et al. <i>A multi-modal parcellation of human cerebral cortex.</i>
-      Nature 536, 171–178 (2016)
+      Nature 536, 171–178 (2016)<br>
+      Yeh F-C. <i>Population-based tract-to-region connectome of the human brain and its
+      hierarchical topology.</i> Nature Communications 13, 4933 (2022)<br>
+      Klein A, Tourville J. <i>101 labeled brain images and a consistent human cortical
+      labeling protocol.</i> Frontiers in Neuroscience 6, 171 (2012)
     </p>
   </div>
 </div>
