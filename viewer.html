@@ -63,10 +63,17 @@
   #tree::-webkit-scrollbar-thumb{background:#2b3550;border-radius:4px}
   /* 大分類は畳まない。左右で半分になるので、開いたまま出しても一覧に収まる。
      畳めるようにしていた頃は、目的の領域に届くまで毎回開く操作が要った。 */
-  .grp>.ghd{padding:7px 2px 3px;display:flex;align-items:center;gap:7px;
-    color:#cfe0ff;user-select:none;border-bottom:1px solid #232e47}
+  /* **見出しそのものが「この分類をまとめて選ぶ」の操作子。**分類ごとにボタンを
+     足すと一覧が操作子だらけになるので、もとから全分類に 1 つずつある見出しに
+     役目を持たせる。件数の欄が「3/17」に変わって、いくつ入っているか分かる。 */
+  .grp>.ghd{padding:7px 2px 3px;display:flex;align-items:center;gap:7px;width:100%;
+    color:#cfe0ff;user-select:none;border:0;border-bottom:1px solid #232e47;
+    background:none;font:inherit;text-align:left;cursor:pointer;border-radius:4px 4px 0 0}
+  .grp>.ghd:hover{color:#eaf1ff;background:#151d2e}
+  .grp>.ghd.on .g{color:#7fd0ff}
   .grp+.grp>.ghd{margin-top:6px}
   .grp>.ghd .n{color:#6f82a8;font-size:11px;margin-left:auto;font-variant-numeric:tabular-nums}
+  .grp>.ghd.on .n{color:#7fd0ff}
   #side{margin-bottom:8px}
   #side button{padding:5px 0 4px;font-size:12px}
   .rgn{display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;
@@ -146,9 +153,11 @@
     line-height:1.5}
   #legend .r .sw{width:11px;height:11px;border-radius:3px;flex:0 0 auto}
   /* 選択のパネルはホバーのものと同じ見た目。留まるかどうかだけが違う */
-  #clearSel{display:none;margin-left:auto;cursor:pointer;font:inherit;font-size:11px;
+  #selAll,#clearSel{cursor:pointer;font:inherit;font-size:11px;
     color:#cfe0ff;background:#25314c;border:1px solid #3b4a6b;border-radius:5px;padding:2px 7px}
-  #clearSel:hover{background:#2f3d5e}
+  #selAll:hover,#clearSel:hover{background:#2f3d5e}
+  #selAll{margin-left:auto}
+  #clearSel{display:none}
   #clearSel.on{display:inline-block}
   #load{position:fixed;inset:0;display:grid;place-items:center;background:#0a0d14;z-index:100;
     transition:opacity .35s ease}
@@ -310,7 +319,10 @@
   </div>
   <div id="atlasMsg"></div>
 
-  <div class="lbl" style="margin:11px 0 4px;display:flex;align-items:center">領域<button
+  <!-- 「全部選ぶ」は**いま一覧に出ているぶん**（＝選んでいる側）が対象。
+       分類ごとの操作子は増やさない——見出しを押すとその分類がまとまって入る。 -->
+  <div class="lbl" style="margin:11px 0 4px;display:flex;align-items:center;gap:6px">領域<button
+    id="selAll" type="button">全部選ぶ</button><button
     id="clearSel" type="button">選択を解除</button></div>
   <!-- 左右はここで切り替える。一覧の中では「左」「右」を頭に付けない -->
   <div class="seg" id="side">
@@ -391,8 +403,6 @@
 
 <!-- 引き出し線。色の線の下に黒い線を敷いて、断面のどんな色の上でも見えるようにする -->
 <svg id="lead">
-  <line id="loS" stroke="rgba(0,0,0,.55)" stroke-width="4" stroke-linecap="round"/>
-  <line id="lnS" stroke="#7fd0ff" stroke-width="1.8" stroke-linecap="round"/>
   <line id="loH" stroke="rgba(0,0,0,.55)" stroke-width="4" stroke-linecap="round"/>
   <line id="lnH" stroke="#7fd0ff" stroke-width="1.8" stroke-linecap="round"/>
   <circle id="leaddot" r="3.4" fill="none" stroke="#7fd0ff" stroke-width="1.8"/>
@@ -1263,31 +1273,45 @@ function scopeOf(name, v){
 
    一覧のボタンは、隠している領域を押せなくする。押しても何も起きないのに
    押せるままだと、壊れているのか隠れているのか読者には区別が付かない。 */
+/* **表示の操作子で隠しているか。選択の有無は見ない。**
+   一覧を押せなくしてよいのはここで隠したときだけ。「見えていない = 押せない」に
+   すると、白質線維で新しく選べなくなる——あちらは「見えていない」が「まだ
+   選んでいない」の意味だから（左右を切り替えると 46/46 が押せなくなった）。 */
+function hiddenByControls(name){
+  if (state.mode !== 'solid') return false;
+  const v = labels[name];
+  if (!v) return false;
+  if (state.half !== 'both' && v.side && v.side !== state.half) return true;
+  /* 表示範囲。**遮っているのは隣の皮質ではなく白質と深部だった**（実測）。
+     片側にしたうえで「皮質」にすると、内側面は 5%→81%、島は 0%→71% まで
+     見えるようになる。透明度を使わずに済む。 */
+  if (state.scope !== 'all') {
+    const k = scopeOf(name, v);
+    if (k && k !== (state.scope === 'cortex' ? 'cortex' : 'sub')) return true;
+  }
+  /* 濃さ 0% は「消す」。opacity を 0 にしただけでは `Raycaster` が拾い、
+     見えない領域の名前がホバーで出る（隠したら pick 側でも除外する規則）。 */
+  if (ghostAtlas() && sel.size && !sel.has(name) && state.ghost <= GHOST_HIDE) return true;
+  return false;
+}
+
+/* メッシュを出すか。**白質線維だけ「選択が表示を決める」。**ここを true から
+   始めると、半割やモードを切り替えるたびに 87 本が全部出る（実際に出た）。 */
+function visibleOf(name){
+  const selDriven = !!(ATLASES[state.atlas] && ATLASES[state.atlas].tracts);
+  return (selDriven ? sel.has(name) : true) && !hiddenByControls(name);
+}
+
+/* 一覧の「押せるか」。**`visible` から引かない**（上の理由）。作り直したときも
+   ここから付け直すので、両方が食い違うことがない。 */
+function syncItemDisabled(){
+  for (const [name, el] of itemByName) el.disabled = hiddenByControls(name);
+}
+
 function applyVisibility(){
   if (!meshByName) return;
-  const solid = state.mode === 'solid';
-  for (const [name, o] of meshByName) {
-    const v = labels[name];
-    let vis = true;
-    if (solid) {
-      if (state.half !== 'both' && v && v.side && v.side !== state.half) vis = false;
-      /* 表示範囲。**遮っているのは隣の皮質ではなく白質と深部だった**（実測）。
-         片側にしたうえで「皮質」にすると、内側面は 5%→81%、島は 0%→71% まで
-         見えるようになる。透明度を使わずに済む。 */
-      if (state.scope !== 'all') {
-        const k = scopeOf(name, v);
-        if (k && k !== (state.scope === 'cortex' ? 'cortex' : 'sub')) vis = false;
-      }
-      /* 濃さ 0% は「消す」。opacity を 0 にしただけでは `Raycaster` が拾い、
-         見えない領域の名前がホバーで出る（隠したら pick 側でも除外する規則）。 */
-      if (ghostAtlas() && sel.size && !sel.has(name) && state.ghost <= GHOST_HIDE) vis = false;
-    }
-    o.visible = vis;
-  }
-  for (const [name, el] of itemByName) {
-    const o = meshByName.get(name);
-    el.disabled = !!o && !o.visible;
-  }
+  for (const [name, o] of meshByName) o.visible = visibleOf(name);
+  syncItemDisabled();
   modelBox = null;                       // 見えている範囲が変わった
   if (hovered && meshByName.get(hovered) && !meshByName.get(hovered).visible) setHover(null);
   for (const n of [...sel]) {
@@ -1398,6 +1422,10 @@ const EM_HOVER = 0x2a3550;
 const sel = new Set();
 let selected = null;
 const itemByName = new Map();
+/* 大分類 -> その一覧に出ている領域名 / 見出しの要素。まとめて選ぶのに使う。
+   **使う関数より前で宣言する**（後ろに置くと TDZ に落ちて黙って止まる）。 */
+const groupItems = new Map();
+const groupHead = new Map();
 
 /* 強調の色は「選択 > ホバー > 無し」の優先で決める。
    ホバーが外れたときに 0 に戻すだけだと、選択中の領域の強調まで消える。
@@ -1430,7 +1458,11 @@ function applyFocus(){
      中が見えないので既定は 0 本で、選んだものだけを見せる。周りを暗く落とす
      必要も無い（そもそも出ていない）。 */
   if (ATLASES[state.atlas] && ATLASES[state.atlas].tracts) {
-    for (const [n, o] of meshByName) o.visible = sel.has(n);
+    /* 見え方の式は `visibleOf` に 1 つだけ持つ。**ここで applyVisibility を
+       呼ばない**——あちらは隠れた選択を外すので、setSel から呼ばれるこの関数と
+       互いに呼び合う。 */
+    for (const [n, o] of meshByName) o.visible = visibleOf(n);
+    syncItemDisabled();
     return;
   }
   /* 選んだものを目立たせるには、そこを明るくするより周りを落とすほうが効く。
@@ -1472,6 +1504,11 @@ function applyFocus(){
 const clearBtn = document.getElementById('clearSel');
 clearBtn.onclick = () => clearSelection();
 
+/* 「全部選ぶ」は**いま一覧に出ているぶん**が対象（＝選んでいる側の片方だけ）。
+   反対側も要るなら左右を切り替えてもう一度押す。隠しているものは触らない。 */
+document.getElementById('selAll').onclick = () =>
+  setSelMany([...itemByName.keys()].filter(n => !hiddenByControls(n)), true);
+
 /* 1 つ足す / 外す。**選べる数に上限は無い。**以前は 3 つで、4 つ目を押すと
    いちばん古いものが外れていた。パネルを脳の上の帯に並べる都合だったが、
    線維を何本も並べて見たいという要望で外した。**溢れるのは札のほうで、
@@ -1491,6 +1528,41 @@ function setSel(name, on){
   applyFocus();
   for (const n of [...group, ...sel]) paint(n);
   syncSelUI();
+}
+
+/* まとめて選ぶ / 外す。**1 つずつ setSel を呼ばない。**あれは呼ぶたびに全体を
+   塗り直すので、件数の 2 乗になる（389 区分だと目に見えて詰まる）。塗り直しは
+   最後に 1 回だけ。 */
+function setSelMany(names, on){
+  if (!names.length) return;
+  for (const n of names) for (const m of groupOf(n)) on ? sel.add(m) : sel.delete(m);
+  selected = on ? names[names.length - 1] : ([...sel].pop() || null);
+  applyFocus();
+  for (const n of meshByName.keys()) paint(n);
+  syncSelUI();
+}
+
+/* 大分類をまとめて選ぶ / 外す。**分類ごとにボタンを足さない**——見出しはもとから
+   全分類に 1 つずつあるので、それ自体を操作子にする。全部入っていれば外す、
+   そうでなければ全部入れる（1 つ押すのと同じ「もう一度で戻る」）。
+   表示の操作子で隠しているものは触らない。 */
+function toggleGroup(g){
+  const names = (groupItems.get(g) || []).filter(n => !hiddenByControls(n));
+  if (!names.length) return;
+  setSelMany(names, !names.every(n => sel.has(n)));
+}
+
+/* 見出しの見え方。全部入っていれば光らせ、途中なら件数を「3/17」にする。 */
+function syncGroupUI(){
+  for (const [g, names] of groupItems) {
+    const el = groupHead.get(g);
+    if (!el) continue;
+    const k = names.filter(n => sel.has(n)).length;
+    el.classList.toggle('on', k > 0 && k === names.length);
+    const num = el.querySelector('.n');
+    if (num) num.textContent = (k && k < names.length) ? `${k}/${names.length}`
+                                                      : String(names.length);
+  }
 }
 
 /* 選択を「見せる単位」で数える。脳底動脈は sel に 2 つ入るが 1 つと数える。 */
@@ -1522,6 +1594,7 @@ function syncGhostUI(){
 function syncSelUI(){
   syncGhostUI();
   for (const [n, el] of itemByName) el.classList.toggle('on', sel.has(n));
+  syncGroupUI();
   clearBtn.classList.toggle('on', sel.size > 0);
   const n = selGroups().length;
   clearBtn.textContent = n > 1 ? `選択を解除 (${n})` : '選択を解除';
@@ -1572,6 +1645,8 @@ function buildTree(){
   const tree = document.getElementById('tree');
   tree.innerHTML = '';
   itemByName.clear();
+  groupItems.clear();
+  groupHead.clear();
   const buckets = new Map();
   const seenGroup = new Set();
   for (const [name, v] of Object.entries(labels)) {
@@ -1590,8 +1665,12 @@ function buildTree(){
     const items = buckets.get(g);
     const d = document.createElement('div');
     d.className = 'grp';
-    d.innerHTML = `<div class="ghd"><span class="g">${g}</span>` +
-                  `<span class="n">${items.length}</span></div>`;
+    d.innerHTML = `<button class="ghd" type="button"><span class="g">${g}</span>` +
+                  `<span class="n">${items.length}</span></button>`;
+    const head = d.firstChild;
+    head.onclick = () => toggleGroup(g);
+    groupHead.set(g, head);
+    groupItems.set(g, items.map(([name]) => name));
     for (const [name, v] of items) {
       const b = document.createElement('button');
       b.className = 'rgn';
@@ -1608,11 +1687,9 @@ function buildTree(){
   }
   /* 作り直すとボタンごと入れ替わるので、選択中の印と「押せるか」を付け直す。
      ここを忘れると、左右を切り替えた直後だけ隠れた領域が押せてしまう。 */
-  for (const [n, el] of itemByName) {
-    el.classList.toggle('on', sel.has(n));
-    const o = meshByName.get(n);
-    el.disabled = !!o && !o.visible;
-  }
+  for (const [n, el] of itemByName) el.classList.toggle('on', sel.has(n));
+  syncItemDisabled();
+  syncGroupUI();
 }
 buildGrouping();
 buildTree();
@@ -1894,11 +1971,11 @@ function brainSpanScreen(){
    動かないようにするため。選択のほうは動く起点が無いので重心から引く。 */
 const tipS = document.getElementById('tipS');
 const tipH = document.getElementById('tipH');
-const lineS = [document.getElementById('loS'), document.getElementById('lnS')];
 const lineH = [document.getElementById('loH'), document.getElementById('lnH')];
 
-/* 選択は複数あるので、パネルも線も 1 つでは足りない。0 番目は HTML に書いてある
-   #tipS / #loS / #lnS をそのまま使い、足りなくなったら複製して足す。 */
+/* 選択は複数あるのでパネルも 1 つでは足りない。0 番目は HTML に書いてある #tipS を
+   そのまま使い、足りなくなったら複製して足す。**線はここには無い**——選択の線は
+   深度テストに掛けるため 3D 側（leadCore / leadHalo）へ移した。 */
 const legendEl = document.getElementById('legend');
 const selPanels = [tipS];
 function selPanel(i){
@@ -1914,18 +1991,103 @@ function selPanel(i){
   return selPanels[i];
 }
 
-const selLines = [lineS];
-function selLine(i){
-  while (selLines.length <= i)
-    selLines.push(lineS.map(l => {
-      const c = l.cloneNode();
-      c.removeAttribute('id');
-      leadEl.appendChild(c);
-      return c;
-    }));
-  return selLines[i];
+/* ───────── 選択の引き出し線は 3D で引く ─────────
+   **SVG の重ね描きだと、脳の向こう側を指していても線が手前に出る。**回して
+   反対側へ回り込んだとき、線が脳をまたいで「そこに無いもの」を指しているように
+   見える。線そのものをシーンに置いて深度テストに掛ければ、脳に隠れる部分は
+   GPU が消してくれる。
+
+   **遮蔽を自前で測るのは無理だった。**レイキャストで線上の点を調べる案を測ったら
+   1 回 1.5〜5.7ms かかる（マクロは面が大きいので最も遅い）。線 1 本につき数回、
+   毎フレームとなると成り立たない。
+
+   手前の端は **near 面**に置く。ここより手前には何も無いので、パネルの近くは
+   必ず出る。奥の端は領域の world 座標そのもの。3D の線分は画面では直線に写るので、
+   見た目は SVG のときと同じ。
+
+   線幅は WebGL では 1px 固定なので、**縁取りは平行に 2 本引いて作る**。画面上で
+   ±1.6px ずらした点を near 面と奥の点それぞれで作り、暗い線を先に描く。 */
+/* 線幅は WebGL では 1px 固定なので、**平行に何本か引いて太さを作る**。
+   1 本だけだと MSAA で 2 画素に割れて半分の明るさになる（実測: 意図した
+   (127,208,255) が (60,98,121) になった）。芯は 2 本、縁取りは外側に 2 本。 */
+const LEAD_CORE = 0x7fd0ff, LEAD_HALO = 0x0a1220;
+const LEAD_CORE_PX = [-0.55, 0.55], LEAD_HALO_PX = [-2.1, 2.1];
+/* 奥の端をカメラ側へ少しだけ浮かせる。断面モードのアンカーは板の**上**の点なので、
+   同じ深度だと板と取り合いになってちらつく。 */
+const LEAD_LIFT = 1.5;
+const LEAD_MAX = 32;                       // 札の上限より多めに取る
+function makeLeads(color, segs){
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(segs * 6), 3));
+  const o = new THREE.LineSegments(g, new THREE.LineBasicMaterial({
+    color, transparent: false, depthTest: true, depthWrite: false, toneMapped: false }));
+  o.frustumCulled = false;                 // near 面の点は毎フレーム動く
+  o.renderOrder = 998;
+  scene.add(o);
+  return o;
 }
-const hideSelLines = (from = 0) => { for (let k = from; k < selLines.length; k++) hideLine(selLines[k]); };
+const leadHalo = makeLeads(LEAD_HALO, LEAD_MAX * LEAD_HALO_PX.length);
+const leadCore = makeLeads(LEAD_CORE, LEAD_MAX * LEAD_CORE_PX.length);
+leadCore.renderOrder = 999;
+const leadScreen = [];                     // 検査用。画面座標での [x1,y1,x2,y2]
+let leadN = 0, leadHaloN = 0, leadCoreN = 0;
+const _lv = new THREE.Vector3(), _lw = new THREE.Vector3(), _lt = new THREE.Vector3();
+
+/* 手前の端を置く距離（カメラから）。**near 面ではなく「脳の少し手前」。**
+   深度は画面上で線形に補間されるので、near 面から引くと線のほとんどが
+   最前面のままになり、脳に隠れない（実際にそうなった。near=1 と 400 の間を
+   画面で半分進んだ地点の NDC 深度は 0.3 で、脳の 0.994 よりずっと手前）。 */
+function leadFront(){
+  const d = camera.position.distanceTo(controls.target);
+  const r = (modelBox && !modelBox.isEmpty()) ? modelBox.getSize(_lt).length() / 2 : 110;
+  return Math.max(camera.near * 2, d - r - 8);
+}
+
+function putSeg(o, i, a, b){
+  const p = o.geometry.attributes.position.array;
+  p[i*6] = a.x; p[i*6+1] = a.y; p[i*6+2] = a.z;
+  p[i*6+3] = b.x; p[i*6+4] = b.y; p[i*6+5] = b.z;
+}
+
+/* 画面の (sx, sy) から world の p まで 1 本引く。縁取りぶんも一緒に積む。
+
+   **NDC は数値で控える。**`project` も `unproject` も同じベクトルを書き換えるので、
+   参照のまま持ち回すと 1 回 unproject した時点で NDC が world に化ける
+   （実際にそれで画面外の座標が出た）。 */
+function pushLead(sx, sy, p){
+  if (leadN >= LEAD_MAX) return;
+  _lw.copy(p).sub(camera.position).normalize().multiplyScalar(-LEAD_LIFT).add(p)
+     .project(camera);
+  const fx = _lw.x, fy = _lw.y, fz = _lw.z;
+  const sxn = (sx / innerWidth) * 2 - 1, syn = -(sy / innerHeight) * 2 + 1;
+  const dx = fx - sxn, dy = fy - syn, len = Math.hypot(dx, dy) || 1;
+  // 画面上で線に直交する向き（1px ぶん）
+  const nx = -dy / len * 2 / innerWidth, ny = dx / len * 2 / innerHeight;
+  const d0 = leadFront();
+  // 手前の端。画面の点を通る視線上、脳の少し手前に置く
+  const head = (x, y) => _lv.set(x, y, 0.5).unproject(camera).sub(camera.position)
+                            .normalize().multiplyScalar(d0).add(camera.position).clone();
+  const tail = (x, y) => _lv.set(x, y, fz).unproject(camera).clone();
+  for (const k of LEAD_CORE_PX)
+    putSeg(leadCore, leadCoreN++, head(sxn + nx * k, syn + ny * k),
+                                  tail(fx + nx * k, fy + ny * k));
+  for (const k of LEAD_HALO_PX)
+    putSeg(leadHalo, leadHaloN++, head(sxn + nx * k, syn + ny * k),
+                                  tail(fx + nx * k, fy + ny * k));
+  leadScreen[leadN] = [sx, sy, (fx + 1) / 2 * innerWidth, (-fy + 1) / 2 * innerHeight];
+  leadN++;
+}
+
+function resetLeads(){ leadN = 0; leadHaloN = 0; leadCoreN = 0; leadScreen.length = 0; }
+function commitLeads(){
+  leadCore.geometry.setDrawRange(0, leadCoreN * 2);
+  leadHalo.geometry.setDrawRange(0, leadHaloN * 2);
+  leadCore.geometry.attributes.position.needsUpdate = true;
+  leadHalo.geometry.attributes.position.needsUpdate = true;
+  leadCore.visible = leadCoreN > 0;
+  leadHalo.visible = leadHaloN > 0;
+}
+const hideSelLines = () => { resetLeads(); commitLeads(); };
 
 /* 断面が手前を向いていないときは選択のパネルも出さない。
    面全体の向きの話なので、クリップ平面とカメラの位置関係だけで決まる。 */
@@ -2118,7 +2280,7 @@ function layoutSelPanels(list){
   if (cur.length) rows.push(cur);
 
   const boxes = [];
-  let y = SEL_TOP, k = 0;
+  let y = SEL_TOP;
   for (const row of rows) {
     let hMax = 0;
     for (const i of row) hMax = Math.max(hMax, selPanels[i].offsetHeight);
@@ -2141,12 +2303,11 @@ function layoutSelPanels(list){
       /* 線はパネルの下から。出る位置はアンカーの真下に寄せる（パネルの中に
          収める）。パネルが x 順に並んでいるので、この始点も x 順のまま。 */
       const sx = Math.max(px + 14, Math.min(px + pw - 14, list[i].ax));
-      setLine(selLine(k++), list[i].ax, list[i].ay, sx, y + ph);
+      pushLead(sx, y + ph, list[i].aw);
       boxes.push({ left: px, right: px + pw, top: y, bottom: y + ph });
     }
     y += hMax + SEL_GAP;
   }
-  hideSelLines(k);
   return boxes;
 }
 
@@ -2214,6 +2375,7 @@ function layoutCallouts(){
      並べるので、枚数ぶんレイアウトが毎フレーム強制される。 */
   const many = reps.length > SEL_TIPS_MAX;
   let avoid = null;
+  resetLeads();
   if (many) {
     hideSelPanels();
     avoid = layoutLegend(reps);
@@ -2221,9 +2383,11 @@ function layoutCallouts(){
     hideLegend();
     const list = [];
     if (show) for (const n of reps) {
-      const a = anchorScreen(n);
-      if (!a) continue;
-      list.push({ name: n, ax: a[0], ay: a[1] });
+      /* **world の点も持つ。**引き出し線は 3D で引くので、画面座標だけでは足りない。 */
+      const p = anchorPoint(n);
+      if (!p) continue;
+      const a = toScreen(p);
+      list.push({ name: n, ax: a[0], ay: a[1], aw: p });
     }
     list.sort((p, q) => p.ax - q.ax);
     avoid = list.length ? layoutSelPanels(list) : null;
@@ -2237,10 +2401,10 @@ function layoutCallouts(){
   } else {
     tipH.style.display = 'none'; hideLine(lineH); dotEl.style.display = 'none';
   }
-  /* 線を持つのは札とホバーだけ。凡例は線を引かないので、ここには数えない。 */
-  leadEl.style.display =
-    (selPanels.every(e => e.style.display === 'none') && tipH.style.display === 'none')
-      ? 'none' : 'block';
+  commitLeads();
+  /* **SVG に残っているのはホバーの線と点だけ。**選択の線は 3D 側（leadCore）へ
+     移した。凡例は線を引かない。 */
+  leadEl.style.display = (tipH.style.display === 'none') ? 'none' : 'block';
 }
 
 function setHover(name){
@@ -2594,6 +2758,14 @@ window.__state = () => ({
   /* 札を絞っているか。選択の数に上限は無いので、**溢れたときにどう振る舞うか**を
      見る（札 1 枚 + 一覧の印、が期待する姿）。 */
   tipsCapped: selGroups().length > SEL_TIPS_MAX,
+  /* 引き出し線。**3D の線なので SVG からは数えられない。**画面座標に直したものを
+     渡して、パネルの下辺から出ているか・交差していないかを検査できるようにする。 */
+  leads: leadScreen.slice(0, leadN).map(a => a.map(v => +v.toFixed(1))),
+  /* 引き出し線の手前の端を置く距離。**near 面に戻すと遮蔽が効かなくなる**ので、
+     「脳の少し手前」に居ることを数字で押さえる。 */
+  leadFront: +leadFront().toFixed(1),
+  // 大分類の見出しの状態。「全部入っている分類」と、件数の表示
+  groups: [...groupItems].map(([g, ns]) => [g, ns.filter(n => sel.has(n)).length, ns.length]),
   // 凡例に載っている行数（出ていなければ 0）
   legend: legendEl.style.display !== 'none'
     ? legendEl.querySelectorAll('.r').length : 0,
