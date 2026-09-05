@@ -130,6 +130,21 @@
   .tip.c2{white-space:normal}          /* ここまで詰めたら、長い名前は折り返す */
   .tip.c2 .ja{font-size:15px;gap:7px}
   .tip.c2 .ja .sw{width:11px;height:11px}
+  /* 凡例。札が並びきらない数まで選んだら、引き出し線をやめてここに一覧する。
+     数十行になるので段組みにし、高さを抑えて中でスクロールさせる。
+     **`white-space` を戻す。**`.tip` は nowrap なので、そのままだと長い名前で
+     段が伸びきる。 */
+  /* **段組み（`column-*`）は使わない。**高さを抑えると、CSS の段組みは縦ではなく
+     **横へ溢れる**ので、凡例の下に横スクロールバーが出る（実際に出た）。
+     grid なら列は幅で決まり、溢れるのは下だけになる。 */
+  #legend{white-space:normal;padding:9px 13px 10px;max-height:32vh;
+    overflow-y:auto;overflow-x:hidden;pointer-events:auto;
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+    gap:2px 14px;align-content:start}
+  #legend .hd{font-size:11px;color:#8b9dc0;margin-bottom:4px;grid-column:1/-1}
+  #legend .r{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#eaf1ff;
+    line-height:1.5}
+  #legend .r .sw{width:11px;height:11px;border-radius:3px;flex:0 0 auto}
   /* 選択のパネルはホバーのものと同じ見た目。留まるかどうかだけが違う */
   #clearSel{display:none;margin-left:auto;cursor:pointer;font:inherit;font-size:11px;
     color:#cfe0ff;background:#25314c;border:1px solid #3b4a6b;border-radius:5px;padding:2px 7px}
@@ -383,6 +398,8 @@
   <circle id="leaddot" r="3.4" fill="none" stroke="#7fd0ff" stroke-width="1.8"/>
 </svg>
 <div id="tipS" class="tip sel"></div>
+<!-- 選択が札で並びきらない数になったときの凡例。札と入れ替わりで出る -->
+<div id="legend" class="tip"></div>
 <div id="tipH" class="tip"></div>
 
 <!-- three.js は同梱する（vendor/three、0.163.0 を固定）。CDN から読むと、
@@ -445,6 +462,9 @@ const IDX = { x:0, y:1, z:2 };
 const noCache = { cache: 'no-cache' };
 const meta = await (await fetch(`${ROOT}/slice_metadata.json`, noCache)).json();
 const labels = await (await fetch('labels.json', noCache)).json();
+/* 一覧の並び（= 生成側の宣言順）。凡例をこの順に並べるために使う。押した順に
+   並べると、同じものを選び直すたびに行が動いて追えない。 */
+const LABEL_ORDER = new Map(Object.keys(labels).map((k, i) => [k, i]));
 
 /* 左右に分かれてはいるが、実体が 1 つの領域（脳底動脈）。生成側が `merge` を
    付けている。メッシュのノードと LUT の対応を崩さないよう、キーは左右のまま
@@ -1452,31 +1472,24 @@ function applyFocus(){
 const clearBtn = document.getElementById('clearSel');
 clearBtn.onclick = () => clearSelection();
 
-/* パネルを脳の上に横へ並べる都合で、選べるのは 3 つまで。4 つ目を押すと
-   いちばん古いものが外れる。押しても何も起きないより、何が起きたか見えるほうがよい。 */
-const MAX_SEL = 3;
+/* 1 つ足す / 外す。**選べる数に上限は無い。**以前は 3 つで、4 つ目を押すと
+   いちばん古いものが外れていた。パネルを脳の上の帯に並べる都合だったが、
+   線維を何本も並べて見たいという要望で外した。**溢れるのは札のほうで、
+   選択そのものではない**——札の出し方は layoutCallouts が絞る。
 
-
-/* 1 つ足す / 外す。色は選択の有無で決まるので、変わった 1 つだけでなく
-   選択中すべてを塗り直す（周りを落とす倍率が集合の大きさで変わる）。 */
+   色は選択の有無で決まるので、変わった 1 つだけでなく選択中すべてを塗り直す
+   （周りを落とす倍率が集合の大きさで変わる）。 */
 function setSel(name, on){
   if (!name) return;
   const group = groupOf(name);               // 脳底動脈は左右の 2 つで 1 つ
-  const dropped = [];
   if (on) {
-    if (!sel.has(name) && selGroups().length >= MAX_SEL) {
-      // いちばん古い**群**をまとめて外す。1 つだけ外すと片側が残る
-      for (const n of groupOf(sel.values().next().value)) {
-        if (sel.delete(n)) dropped.push(n);
-      }
-    }
     for (const n of group) sel.add(n);
   } else {
     for (const n of group) sel.delete(n);
   }
   selected = on ? name : ([...sel].pop() || null);
   applyFocus();
-  for (const n of [...group, ...dropped, ...sel]) paint(n);
+  for (const n of [...group, ...sel]) paint(n);
   syncSelUI();
 }
 
@@ -1886,6 +1899,7 @@ const lineH = [document.getElementById('loH'), document.getElementById('lnH')];
 
 /* 選択は複数あるので、パネルも線も 1 つでは足りない。0 番目は HTML に書いてある
    #tipS / #loS / #lnS をそのまま使い、足りなくなったら複製して足す。 */
+const legendEl = document.getElementById('legend');
 const selPanels = [tipS];
 function selPanel(i){
   while (selPanels.length <= i) {
@@ -2029,6 +2043,9 @@ function placeTip(el, ls, name, origin, avoid){
 /* 選択のパネルを置く高さと、パネルどうしの間隔。
    上端に貼り付けない——窓の縁との間に空きがあるほうが読みやすい。 */
 const SEL_TOP = 36, SEL_GAP = 10;
+/* **札を出すのはここまで。**選択そのものに上限は無いが、札は画面上端の帯に
+   並ぶので、増えると脳を覆う。超えたときは「いま押した 1 つ」だけ出す。 */
+const SEL_TIPS_MAX = 8;
 
 /* 画面上端の帯（高さ h のものを置ける横の範囲）。
    左右の UI は縦に長いので、空くのはその間になる。 */
@@ -2138,24 +2155,80 @@ function hideSelPanels(){
   hideSelLines();
 }
 
+/* 札の代わりに出す凡例。**引き出し線は引かない。**数十本を線で結ぶと脳が線で
+   埋まるうえ、どの線がどの札のものか読めなくなる。色と名前の対応だけを渡す。
+
+   札と違って**断面に出ていないものも載せる。**札を落とすのは線が引けないから
+   であって、名前を出せないからではない。凡例は「いま何を選んでいるか」の一覧。 */
+function layoutLegend(items){
+  const band = topBand(40);
+  if (!band) { hideLegend(); return null; }   // 帯が無いなら出しっぱなしにしない
+  const [lo, hi] = band;
+  const key = items.join('|');
+  if (legendEl.dataset.key !== key) {           // 毎フレーム書き換えない
+    legendEl.dataset.key = key;
+    legendEl.innerHTML = `<div class="hd">選択中 ${items.length}</div>` +
+      items.map(n => {
+        const v = labels[n] || {};
+        const c = v.color ? `rgb(${v.color.join(',')})` : '#888';
+        return `<div class="r"><span class="sw" style="background:${c}"></span>${
+          v.ja || n}</div>`;
+      }).join('');
+  }
+  /* **`block` にしない。**インラインの display は CSS の `display:grid` を上書き
+     するので、段が 1 列に潰れる（実際に潰れた）。 */
+  legendEl.style.display = 'grid';
+  legendEl.style.left = lo + 'px';
+  legendEl.style.width = (hi - lo) + 'px';
+  legendEl.style.top = SEL_TOP + 'px';
+  hideSelLines();
+  return [{ left: lo, right: hi, top: SEL_TOP, bottom: SEL_TOP + legendEl.offsetHeight }];
+}
+
+function hideLegend(){
+  legendEl.style.display = 'none';
+  legendEl.dataset.key = '';
+}
+
 function layoutCallouts(){
   /* 出すのは**いま画面に出ている領域だけ**。断面に無いものは線が引けないので、
      名前も出さない。断面が手前を向いていないときは選択のパネルごと出さない
      （立体モードにはその条件が無い。面ではなくモデルを見ているため）。 */
   const show = sel.size > 0 && (state.mode === 'solid' || faceVisible());
-  const list = [];
+  /* 群の代表を 1 つずつ（脳底動脈は左右で 1 つ）。並びは**一覧と同じ順**にする。 */
+  const reps = [];
   const done = new Set();
-  if (show) for (const n of sel) {
+  for (const n of sel) {
     const g = groupKey(n);
-    if (done.has(g)) continue;               // 脳底動脈は左右で 1 枚
-    const a = anchorScreen(n);
-    if (!a) continue;
+    if (done.has(g)) continue;
     done.add(g);
-    list.push({ name: n, ax: a[0], ay: a[1] });
+    reps.push(n);
   }
-  list.sort((p, q) => p.ax - q.ax);
-  let avoid = list.length ? layoutSelPanels(list) : null;
-  if (!avoid) hideSelPanels();
+  reps.sort((a, b) => (LABEL_ORDER.get(a) ?? 1e9) - (LABEL_ORDER.get(b) ?? 1e9));
+
+  /* **札で並びきるうちは札、越えたら凡例。**引き出し線つきの札は「どこにあるか」
+     まで示せるが、帯に並ぶので数が増えると脳を覆う。SEL_TIPS_MAX を越えたら
+     線をやめ、色と名前の対応だけを凡例に出す。
+
+     枚数を絞るのは見た目のためだけではない——札は `offsetWidth` で実寸を測って
+     並べるので、枚数ぶんレイアウトが毎フレーム強制される。 */
+  const many = reps.length > SEL_TIPS_MAX;
+  let avoid = null;
+  if (many) {
+    hideSelPanels();
+    avoid = layoutLegend(reps);
+  } else {
+    hideLegend();
+    const list = [];
+    if (show) for (const n of reps) {
+      const a = anchorScreen(n);
+      if (!a) continue;
+      list.push({ name: n, ax: a[0], ay: a[1] });
+    }
+    list.sort((p, q) => p.ax - q.ax);
+    avoid = list.length ? layoutSelPanels(list) : null;
+    if (!avoid) hideSelPanels();
+  }
 
   if (hovered && !sel.has(hovered) && ptr) {
     placeTip(tipH, lineH, hovered, [ptr.x, ptr.y], avoid);
@@ -2164,6 +2237,7 @@ function layoutCallouts(){
   } else {
     tipH.style.display = 'none'; hideLine(lineH); dotEl.style.display = 'none';
   }
+  /* 線を持つのは札とホバーだけ。凡例は線を引かないので、ここには数えない。 */
   leadEl.style.display =
     (selPanels.every(e => e.style.display === 'none') && tipH.style.display === 'none')
       ? 'none' : 'block';
@@ -2517,6 +2591,12 @@ window.__state = () => ({
                                    return !o || o.material.transparent === false; }),
   clip: state.clip, sliceVisible: sliceMesh.visible, world: { ...state.world },
   nodes: meshByName.size, models: [...models.keys()],
+  /* 札を絞っているか。選択の数に上限は無いので、**溢れたときにどう振る舞うか**を
+     見る（札 1 枚 + 一覧の印、が期待する姿）。 */
+  tipsCapped: selGroups().length > SEL_TIPS_MAX,
+  // 凡例に載っている行数（出ていなければ 0）
+  legend: legendEl.style.display !== 'none'
+    ? legendEl.querySelectorAll('.r').length : 0,
   /* 幾何の種類。**白質線維だけ線**（brainslice/streamlines.py）。面に戻ると
      走行が消えて「そういう形の塊」に見えるので、型そのものを検査する。 */
   geomKind: (() => {
