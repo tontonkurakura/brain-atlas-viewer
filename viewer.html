@@ -282,6 +282,18 @@
 
   <!-- 立体モードだけの操作。断面モードでは丸ごと隠す -->
   <div id="solidCtl" style="display:none">
+  <!-- 参照断面。**線維がどこを通るかの手掛かり。**背景の脳は透かしてあるので
+       形は分かっても場所が読めない。MRI を 1 枚立てると、そこが手掛かりになる。
+       面を選ぶと断面の面そのものが変わるので、位置スライダーは**移動**させて使う。 -->
+  <div class="lbl" id="refLbl">参照断面</div>
+  <div class="seg" id="ref">
+    <button data-r="none" class="on">なし</button>
+    <button data-r="sagittal">矢状</button>
+    <button data-r="coronal">冠状</button>
+    <button data-r="axial">軸位</button>
+  </div>
+  <div id="refPos"></div>
+
   <div class="lbl">半割</div>
   <div class="seg" id="half">
     <button data-h="both" class="on">両側<small>Both</small></button>
@@ -838,6 +850,12 @@ const GHOST_DEFAULT = 0.20;
 /* これ以下は「消す」として扱う。0 に張り付いたまま `Raycaster` に拾わせない */
 const GHOST_HIDE = 0.02;
 
+/* 参照断面を立てているか。**立体モードでだけ意味がある。** */
+function refOn(){
+  return state.mode === 'solid' && state.ref !== 'none'
+      && !!(ATLASES[state.atlas] && ATLASES[state.atlas].refSlice);
+}
+
 /* 透かしが効くアトラスか。効かないところでは操作子も出さない */
 function ghostAtlas(){
   return !!(ATLASES[state.atlas] && ATLASES[state.atlas].focusGhost);
@@ -868,6 +886,7 @@ const state = { plane: (Q.get('plane')||'axial'), mode: (Q.get('mode')||'slice')
                 atlas: (Q.get('atlas')||'macro'), side:'L',
                 ghost:GHOST_DEFAULT,               // 選択していない領域の不透明度（ghostBy が持ち主）
                 half:'both', scope:'all',          // 立体モードの見せ方
+                ref:'none',                        // 立体モードで立てる参照断面
                 overlay:true, cut:true,            // 重ね方（操作子の状態）
                 world:{x:0,y:0,z:0}, clip:true };  // clip は cut の実効値
 
@@ -934,8 +953,12 @@ const ATLASES = {
      捨てて灰色に潰すから、区分の細かさは見た目に出ない。Glasser を借りていた
      時期があるが、あれは繋ぎ先の皮質を同じモデルの中で濃く塗るためで、その機能を
      外したいまは 8.8MB を余分に読むだけになる（docs/archive/tract-connects.md）。 */
+  /* 背景に出すのは**外殻だけ**。白質・脳室・基底核・視床・深部の辺縁系を落とす。
+     透かした面は重なるほど靄になるので、層を減らすほうが形が読める。 */
+  /* 参照断面を立てられる。線維は断面に色を持たないので、出るのは MRI だけ。 */
   tract: { name:'トラクトグラフィー', model:'brain_tract.glb', tracts:true,
-           solidOnly:true, backdrop:'macro', labelAtlas:'dkt',
+           solidOnly:true, backdrop:'macro', labelAtlas:'dkt', refSlice:true,
+           backdropSkip: /-wm$|-ventricle$|-basal$|-dienceph$|-limbic_deep$/,
            groups:['連合線維','投射線維','交連線維','小脳','脳神経'] },
 };
 
@@ -1005,7 +1028,8 @@ function showSlice(p, w){
     readLabelTile(e, i);
     computeAnchors();
     if (hovered) setHover(null);
-    sliceMesh.visible = state.mode !== 'solid';   // 立体モードでは読めても出さない
+    // 立体モードでは出さない。**ただし参照断面を立てているときは出す**
+    sliceMesh.visible = state.mode !== 'solid' || refOn();
   };
   /* 両方揃ってから貼る。T1 だけを見て put() を呼ぶと、アトラスを切り替えた
      直後（T1 は読み終わっていてラベルはこれから）に put() が空振りし、
@@ -1112,7 +1136,10 @@ const GHOST_COLOR = 0xaebdd6;
 /* トラクトの背景。**こちらは動かさない。**弓状束を出して見比べて決めた値で、
    0.42 では束が完全に隠れ、0.16 では形が読めず、0.10 で形がはっきり出た。
    選択の透かし（`state.ghost`）とは役割が違うので、同じつまみに繋がない。 */
-const GHOST_OPACITY = 0.10;
+/* 0.10 から 0.20 へ。**内側の層を落としたぶん濃くできる。**全部の層を出したまま
+   濃くすると、入れ子の面が重なって脳が乳白色の靄になるだけで、形は読めない
+   （0.25 / 0.40 で実測した）。 */
+const GHOST_OPACITY = 0.20;
 /* ネットワークで選択外を潰す灰色。**色オブジェクトで持つ。**`setHex().multiplyScalar()`
    だと sRGB からの変換が挟まるので、`getHex()` で読み返しても同じ値にならず、
    検査から見分けが付かない。 */
@@ -1141,9 +1168,13 @@ function setBackdrop(atlas){
     x.side = THREE.FrontSide;             // 視線が貫く層を半分にする
     x.userData.ghost = true; x.needsUpdate = true;
   });
-  // 半割や皮質の切り替えで隠れていることがあるので、背景では全部出す
+  /* 半割や皮質の切り替えで隠れていることがあるので、背景では出し直す。
+     **ただし内側の層は落とす**（`backdropSkip`）——透かした面は重なるほど
+     靄になるので、層を減らすほうが形が読める。借りるのをやめたときは、
+     そのアトラスを選び直した時点で applyVisibility が出し直す。 */
+  const skip = ATLASES[state.atlas] && ATLASES[state.atlas].backdropSkip;
   m.root.visible = true;
-  m.root.traverse(o => { if (o.isMesh) o.visible = true; });
+  for (const [name, o] of m.meshByName) o.visible = !(skip && skip.test(name));
   backdropAtlas = atlas;
 }
 
@@ -1320,6 +1351,22 @@ function applyVisibility(){
   }
 }
 
+/* 参照断面。面を選ぶと断面の面そのものを変える（立体モードでは #axis を
+   出さないので、ここが面の入口になる）。 */
+document.querySelectorAll('#ref button').forEach(b => {
+  b.onclick = () => {
+    if (b.dataset.r === state.ref) return;
+    state.ref = b.dataset.r;
+    if (state.ref !== 'none' && state.ref !== state.plane) {
+      state.plane = state.ref;
+      document.querySelectorAll('#axis button').forEach(
+        x => x.classList.toggle('on', x.dataset.p === state.plane));
+      syncSlider(); apply();
+    }
+    applyMode(); layoutCallouts();
+  };
+});
+
 document.querySelectorAll('#half button').forEach(b=>{
   b.onclick = ()=>{
     if (b.dataset.h === state.half) return;
@@ -1359,9 +1406,18 @@ function applyMode(){
   const solid = state.mode === 'solid';
   document.querySelectorAll('#mode button').forEach(
     b => b.classList.toggle('on', b.dataset.m === state.mode));
+  /* **面の操作子を 2 つ出さない。**参照断面の側（#ref）が面も決めるので、
+     断面モードの操作子はそのまま隠す。位置スライダーだけを移動させて使う。 */
+  const ref = refOn();
   document.getElementById('sliceCtl').style.display = solid ? 'none' : '';
   document.getElementById('barPos').style.display = solid ? 'none' : '';
   document.getElementById('solidCtl').style.display = solid ? '' : 'none';
+  const hasRef = solid && !!(ATLASES[state.atlas] && ATLASES[state.atlas].refSlice);
+  document.getElementById('refLbl').style.display = hasRef ? '' : 'none';
+  document.getElementById('ref').style.display = hasRef ? '' : 'none';
+  document.querySelectorAll('#ref button').forEach(
+    b => b.classList.toggle('on', b.dataset.r === state.ref));
+  placePos();
   /* 皮質と皮質下を分けられるアトラスでだけ出す（血管支配とトラクトには無い） */
   const hasScope = solid && !!SCOPE[state.atlas];
   document.getElementById('scopeLbl').style.display = hasScope ? '' : 'none';
@@ -1370,7 +1426,10 @@ function applyMode(){
     b => b.classList.toggle('on', b.dataset.s === state.scope));
 
   syncGhostUI();
-  sliceMesh.visible = !solid && uiReady && !!lblData;
+  /* 参照断面は**MRI だけ**。線維は断面に色を持たないので、領域色を重ねても
+     手掛かりにならず、線維の色とぶつかるだけ。 */
+  sliceMesh.visible = (!solid || ref) && uiReady && !!lblData;
+  labMesh.visible = !solid && state.overlay;
 
   // クリップは断面モードの操作子にだけ従う。既に読んだモデルにも掛け直す
   state.clip = !solid && state.cut;
@@ -2659,17 +2718,31 @@ scrim.onclick = closeSheets;
 document.getElementById('prevS').onclick = ()=> stepSlice(-1);
 document.getElementById('nextS').onclick = ()=> stepSlice(1);
 
+/* 位置スライダーの置き場は 3 つある。**どれも移動であって複製ではない。**
+   決めるのはここ 1 か所だけにする——2 か所から動かすと、必ずどちらかが
+   古い場所へ戻す。
+
+     参照断面を出しているとき … 参照断面の下（立体モードの箱の中）
+     狭い画面 × 断面モード     … 下のバー
+     それ以外                 … もとの場所（#sliceCtl の中） */
+function placePos(){
+  if (refOn()) document.getElementById('refPos').appendChild(takeHome(posBlock));
+  else if (NARROW.matches && state.mode !== 'solid')
+    document.getElementById('barPos').insertBefore(takeHome(posBlock),
+                                                  document.getElementById('nextS'));
+  else if (homes.has(posBlock)) goHome(posBlock);
+}
+
 function relayout(){
   const narrow = NARROW.matches;
   document.body.classList.toggle('narrow', narrow);
   if (narrow) {
     document.getElementById('barMode').appendChild(takeHome(modeEl));
-    document.getElementById('barPos').insertBefore(takeHome(posBlock),
-                                                  document.getElementById('nextS'));
     panelEl.appendChild(takeHome(noteEl));        // 設定シートの末尾へ
   } else if (homes.size) {
-    goHome(modeEl); goHome(posBlock); goHome(noteEl);
+    goHome(modeEl); goHome(noteEl);
   }
+  placePos();
   if (!narrow) closeSheets();
   barEl.style.display = narrow ? 'flex' : 'none';
   if (narrow) fitView();          // PC 側の見え方には触れない
@@ -2750,6 +2823,7 @@ window.__occluders = (name, samples = 60) => {
 window.__state = () => ({
   atlas: state.atlas, plane: state.plane, side: state.side, mode: state.mode,
   half: state.half, scope: state.scope, overlay: state.overlay, cut: state.cut,
+  ref: state.ref,
   touch: TOUCH.matches, narrow: NARROW.matches,
   selected, selection: [...sel],
   // 選択中のアンカー（world RAS mm）。正中かどうかを画面ではなく座標で確かめる口
