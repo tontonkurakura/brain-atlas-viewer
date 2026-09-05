@@ -2009,9 +2009,11 @@ function selPanel(i){
    ±1.6px ずらした点を near 面と奥の点それぞれで作り、暗い線を先に描く。 */
 /* 線幅は WebGL では 1px 固定なので、**平行に何本か引いて太さを作る**。
    1 本だけだと MSAA で 2 画素に割れて半分の明るさになる（実測: 意図した
-   (127,208,255) が (60,98,121) になった）。芯は 2 本、縁取りは外側に 2 本。 */
+   (127,208,255) が (60,98,121) になった）。**芯は 3 本**——2 本でも小数位置に
+   よっては 75% までしか埋まらず、線ごとに明るさが変わる（実測 (96,156,192)）。
+   真ん中の 1 本があれば、どこに落ちても 1 画素は必ず埋まる。 */
 const LEAD_CORE = 0x7fd0ff, LEAD_HALO = 0x0a1220;
-const LEAD_CORE_PX = [-0.55, 0.55], LEAD_HALO_PX = [-2.1, 2.1];
+const LEAD_CORE_PX = [-0.55, 0, 0.55], LEAD_HALO_PX = [-2.1, 2.1];
 /* 奥の端をカメラ側へ少しだけ浮かせる。断面モードのアンカーは板の**上**の点なので、
    同じ深度だと板と取り合いになってちらつく。 */
 const LEAD_LIFT = 1.5;
@@ -2019,8 +2021,13 @@ const LEAD_MAX = 32;                       // 札の上限より多めに取る
 function makeLeads(color, segs){
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(segs * 6), 3));
+  /* **transparent を立てる。**不透明のままだと不透明キューに入り、断面の板
+     （transparent）より**先**に描かれて板に塗り潰される。断面モードで線が
+     途切れ途切れになったのはこれ。透明キューの最後（renderOrder）に回せば、
+     深度テストは不透明の深度バッファに対して効いたまま、板より後に描ける。 */
   const o = new THREE.LineSegments(g, new THREE.LineBasicMaterial({
-    color, transparent: false, depthTest: true, depthWrite: false, toneMapped: false }));
+    color, transparent: true, opacity: 1, depthTest: true, depthWrite: false,
+    toneMapped: false }));
   o.frustumCulled = false;                 // near 面の点は毎フレーム動く
   o.renderOrder = 998;
   scene.add(o);
@@ -2033,14 +2040,23 @@ const leadScreen = [];                     // 検査用。画面座標での [x1
 let leadN = 0, leadHaloN = 0, leadCoreN = 0;
 const _lv = new THREE.Vector3(), _lw = new THREE.Vector3(), _lt = new THREE.Vector3();
 
-/* 手前の端を置く距離（カメラから）。**near 面ではなく「脳の少し手前」。**
-   深度は画面上で線形に補間されるので、near 面から引くと線のほとんどが
-   最前面のままになり、脳に隠れない（実際にそうなった。near=1 と 400 の間を
-   画面で半分進んだ地点の NDC 深度は 0.3 で、脳の 0.994 よりずっと手前）。 */
-function leadFront(){
-  const d = camera.position.distanceTo(controls.target);
-  const r = (modelBox && !modelBox.isEmpty()) ? modelBox.getSize(_lt).length() / 2 : 110;
-  return Math.max(camera.near * 2, d - r - 8);
+/* 引き出し線の深度に使う点。**領域の重心ではなく「その領域の手前側」。**
+   重心は皮質の内側にあるので、手前にある領域でも自分の表面に隠れてしまう。
+   外接球の半径ぶんカメラ側へ出すと、手前の領域では表面より前、向こう側の
+   領域では脳の中に残る——欲しい振る舞いがそのまま出る。
+
+   **視線に沿って動かすので、画面上の位置は変わらない。**引き出し線の先が
+   指す場所はアンカーのままで、深度だけが変わる。 */
+function anchorFront(name, p){
+  let r = 0;
+  for (const n of groupOf(name)) {
+    const o = meshByName && meshByName.get(n);
+    if (!o || !o.geometry) continue;
+    if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+    r = Math.max(r, o.geometry.boundingSphere.radius);
+  }
+  return _lt.copy(camera.position).sub(p).normalize()
+            .multiplyScalar(r + LEAD_LIFT).add(p).clone();
 }
 
 function putSeg(o, i, a, b){
@@ -2054,32 +2070,44 @@ function putSeg(o, i, a, b){
    **NDC は数値で控える。**`project` も `unproject` も同じベクトルを書き換えるので、
    参照のまま持ち回すと 1 回 unproject した時点で NDC が world に化ける
    （実際にそれで画面外の座標が出た）。 */
-function pushLead(sx, sy, p){
+function pushLead(sx, sy, q){
   if (leadN >= LEAD_MAX) return;
-  _lw.copy(p).sub(camera.position).normalize().multiplyScalar(-LEAD_LIFT).add(p)
-     .project(camera);
+  _lw.copy(q).project(camera);
   const fx = _lw.x, fy = _lw.y, fz = _lw.z;
   const sxn = (sx / innerWidth) * 2 - 1, syn = -(sy / innerHeight) * 2 + 1;
   const dx = fx - sxn, dy = fy - syn, len = Math.hypot(dx, dy) || 1;
   // 画面上で線に直交する向き（1px ぶん）
   const nx = -dy / len * 2 / innerWidth, ny = dx / len * 2 / innerHeight;
-  const d0 = leadFront();
-  // 手前の端。画面の点を通る視線上、脳の少し手前に置く
-  const head = (x, y) => _lv.set(x, y, 0.5).unproject(camera).sub(camera.position)
-                            .normalize().multiplyScalar(d0).add(camera.position).clone();
-  const tail = (x, y) => _lv.set(x, y, fz).unproject(camera).clone();
+  /* **両端を同じ深度に置く。**手前の端を脳の前に置くと、線は前から奥へ潜る
+     ことになり、向こう側の領域を指していても脳の手前側に食い込んで見える。
+     深度を揃えれば、脳がそれより手前にある範囲＝輪郭の内側でまるごと隠れ、
+     線は脳の辺縁でぴたりと止まる。 */
+  const at = (x, y) => _lv.set(x, y, fz).unproject(camera).clone();
   for (const k of LEAD_CORE_PX)
-    putSeg(leadCore, leadCoreN++, head(sxn + nx * k, syn + ny * k),
-                                  tail(fx + nx * k, fy + ny * k));
+    putSeg(leadCore, leadCoreN++, at(sxn + nx * k, syn + ny * k),
+                                  at(fx + nx * k, fy + ny * k));
   for (const k of LEAD_HALO_PX)
-    putSeg(leadHalo, leadHaloN++, head(sxn + nx * k, syn + ny * k),
-                                  tail(fx + nx * k, fy + ny * k));
+    putSeg(leadHalo, leadHaloN++, at(sxn + nx * k, syn + ny * k),
+                                  at(fx + nx * k, fy + ny * k));
   leadScreen[leadN] = [sx, sy, (fx + 1) / 2 * innerWidth, (-fy + 1) / 2 * innerHeight];
   leadN++;
 }
 
+/* **断面モードでは深度テストを切る。**あちらで見えているのは切り口で、
+   アンカーは必ずその面の上にある。線が通る途中に残った半分の脳があるので、
+   深度を見ると手前の領域を指していても途中で切られる（実際に切られた）。
+   遮蔽が意味を持つのは立体モードだけ。 */
+function leadDepth(on){
+  if (leadCore.material.depthTest === on) return;
+  for (const o of [leadCore, leadHalo]) {
+    o.material.depthTest = on;
+    o.material.needsUpdate = true;
+  }
+}
+
 function resetLeads(){ leadN = 0; leadHaloN = 0; leadCoreN = 0; leadScreen.length = 0; }
 function commitLeads(){
+  leadDepth(state.mode === 'solid');
   leadCore.geometry.setDrawRange(0, leadCoreN * 2);
   leadHalo.geometry.setDrawRange(0, leadHaloN * 2);
   leadCore.geometry.attributes.position.needsUpdate = true;
@@ -2387,7 +2415,11 @@ function layoutCallouts(){
       const p = anchorPoint(n);
       if (!p) continue;
       const a = toScreen(p);
-      list.push({ name: n, ax: a[0], ay: a[1], aw: p });
+      /* 線の深度に使う点。立体では領域の手前側、断面では板の少し上 */
+      const q = (state.mode === 'solid') ? anchorFront(n, p)
+              : _lt.copy(camera.position).sub(p).normalize()
+                   .multiplyScalar(LEAD_LIFT).add(p).clone();
+      list.push({ name: n, ax: a[0], ay: a[1], aw: q });
     }
     list.sort((p, q) => p.ax - q.ax);
     avoid = list.length ? layoutSelPanels(list) : null;
@@ -2761,9 +2793,9 @@ window.__state = () => ({
   /* 引き出し線。**3D の線なので SVG からは数えられない。**画面座標に直したものを
      渡して、パネルの下辺から出ているか・交差していないかを検査できるようにする。 */
   leads: leadScreen.slice(0, leadN).map(a => a.map(v => +v.toFixed(1))),
-  /* 引き出し線の手前の端を置く距離。**near 面に戻すと遮蔽が効かなくなる**ので、
-     「脳の少し手前」に居ることを数字で押さえる。 */
-  leadFront: +leadFront().toFixed(1),
+  /* 引き出し線が深度テストに掛かっているか。**断面モードでは切る**——あちらは
+     切り口を見るモードで、途中に残った半分の脳があると線が切られてしまう。 */
+  leadDepthTest: leadCore.material.depthTest,
   // 大分類の見出しの状態。「全部入っている分類」と、件数の表示
   groups: [...groupItems].map(([g, ns]) => [g, ns.filter(n => sel.has(n)).length, ns.length]),
   // 凡例に載っている行数（出ていなければ 0）
