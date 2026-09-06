@@ -15,7 +15,7 @@
 | 解剖学領域（ミクロ） | 93 | Desikan-Killiany-Tourville |
 | 血管支配領域 | 32 | JHU Arterial Atlas Level 1 |
 | 機能的領域 | 360 | HCP-MMP1（Glasser）。解剖 22 区分と Yeo 7 ネットワークで並べ替えられる |
-| トラクトグラフィー | 87 | HCP1065 の平均トラクト。選ぶと繋ぐ皮質領域も色付く |
+| トラクトグラフィー | 87 | HCP1065 の平均トラクト（1065 例）。streamline をそのまま線で描く |
 
 ## 作り
 
@@ -34,28 +34,23 @@ python3 -m http.server 8791    # このフォルダで
 
 ## 使うにあたって
 
-**診断や臨床判断の材料には使わないこと。**教育と参照を目的としている。領域の
-区分は自動処理の結果で、個々の症例に当てはまるものではない。左右の向きは
+**教育と参照を目的としている。診断・治療の判断には使わないこと。**表示している
+のは標準脳に公開アトラスを当てはめた区分で、区分の境界にも血管や線維の走行にも
+個人差がある。個々の症例の解剖と一致することを保証するものではない。左右の向きは
 neurological（画像の左が患者の左）。
 
 ## ライセンスと出典
 
-画面右下の「ライセンスと注意事項」に全文がある。派生物の扱いだけここに書く。
+**1 つのライセンスでは配れない。**ファイルごとの条件は [LICENSE.md](LICENSE.md) に
+まとめてある。要点だけ:
 
 | | |
 |---|---|
-| `brain_arterial.glb` / `label_atlas_arterial.webp` | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)（JHU Arterial Atlas から継承） |
+| `brain_arterial.glb` / `brain_tract.glb` とその断面画像 | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)（JHU Arterial Atlas と HCP1065 から継承） |
+| 標準脳の MRI と HCP 系のアトラス | [WU-Minn HCP Open Access Data Use Terms](https://www.humanconnectome.org/study/hcp-young-adult/document/wu-minn-hcp-consortium-open-access-data-use-terms)（**同じ条件でのみ再配布可**。定型の謝辞も要る） |
 | `vendor/three/` | MIT |
-| MNI152 / FreeSurfer / FastSurfer / HCP-MMP1 / HCP1065 | 各配布元に従う |
 
-> Liu C-F, et al. *Digital 3D Brain MRI Arterial Territories Atlas.*
-> Scientific Data 10, 74 (2023). © 2021 The Johns Hopkins University
->
-> Glasser MF, et al. *A multi-modal parcellation of human cerebral cortex.*
-> Nature 536, 171–178 (2016)
->
-> Yeh F-C, et al. *Population-averaged atlas of the macroscale human structural
-> connectome and its network topology.* NeuroImage 178, 57–68 (2018)
+画面右下の「ライセンスと注意事項」にも同じことが書いてある。
 
 ## このリポジトリについて
 
