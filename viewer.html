@@ -160,17 +160,35 @@
   #selAll:hover,#clearSel:hover{background:#2f3d5e}
   #selAll{margin-left:auto}
   /* セット。選択をまとめて覚えておき、押すと呼び戻す（プレゼン用） */
-  #sets{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}
-  #sets button{cursor:pointer;font:inherit;font-size:11.5px;color:#cfe0ff;background:#1b2438;
-    border:1px solid #3b4a6b;border-radius:5px;padding:2px 7px;max-width:100%;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 画面の下端の中央。左右のパネル（幅 250px 前後）には掛からない幅に抑える */
+  #sets{position:fixed;left:290px;right:290px;bottom:14px;z-index:10;
+    display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px 10px;
+    pointer-events:none}
+  #sets>*{pointer-events:auto}
+  #sets .chip{position:relative;display:inline-flex;max-width:100%}
+  #sets button{cursor:pointer;font:inherit;font-size:13px;color:#e8eefc;
+    background:rgba(24,32,50,.92);border:1px solid #3b4a6b;border-radius:8px;padding:6px 12px;
+    max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #sets button:hover{background:#2f3d5e}
-  #sets button.on{background:#2a6fd6;border-color:#2a6fd6;color:#fff}
-  #sets button small{color:#8b9dc0;font-size:10px;margin-left:4px}
+  #sets button.on{background:#2a6fd6;border-color:#5aa0ff;color:#fff}
+  #sets button small{color:#8b9dc0;font-size:10.5px;margin-left:5px}
   #sets button.on small{color:#dbe7ff}
-  #sets .x{color:#8b9dc0;padding:2px 5px}
-  #sets #setSave{border-style:dashed;background:none}
+  /* 消す印。**名前のボタンの右上に重ねる**（横に並べると、押し間違えやすい） */
+  #sets .chip .x{position:absolute;top:-7px;right:-7px;width:18px;height:18px;padding:0;
+    border-radius:50%;font-size:11px;line-height:16px;text-align:center;
+    color:#cfd9ee;background:#3a4560;border:1px solid #56627f}
+  #sets .chip .x:hover{background:#c0392b;border-color:#e0675a;color:#fff}
+  #sets #setSave{border-style:dashed;background:rgba(16,21,33,.7);color:#cfe0ff}
   #sets #setSave:disabled{opacity:.4;cursor:default}
+  /* 狭い画面では下のバーの 1 行目。折り返さず横に流す。上に × の分の余白を取る */
+  #bar #sets{position:static;flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;
+    padding:8px 8px 0 0;gap:12px}
+  #bar #sets button{font-size:14px;min-height:36px;padding:0 12px;border-radius:9px}
+  #bar #sets .chip{flex:0 0 auto;max-width:70vw}
+  #bar #sets #setSave{flex:0 0 auto;min-height:36px}
+  /* `#bar #sets button` のほうが詳細度が高いので、× の寸法を打ち消し直す */
+  #bar #sets .chip .x{min-height:0;width:20px;height:20px;padding:0;font-size:12px;
+    line-height:18px;border-radius:50%}
   #clearSel{display:none}
   #clearSel.on{display:inline-block}
   #load{position:fixed;inset:0;display:grid;place-items:center;background:#0a0d14;z-index:100;
@@ -356,9 +374,6 @@
   <div class="lbl" style="margin:11px 0 4px;display:flex;align-items:center;gap:6px">領域<button
     id="selAll" type="button">全部選ぶ</button><button
     id="clearSel" type="button">選択を解除</button></div>
-  <!-- セット。**いまの選択を名前を付けて覚え、押すと呼び戻す。**プレゼンで同じ
-       組み合わせを何度も見せるため。ブラウザ（localStorage）に保存する -->
-  <div id="sets"><button id="setSave" type="button" disabled>＋ いまの選択をセットに</button></div>
   <!-- 左右はここで切り替える。一覧の中では「左」「右」を頭に付けない -->
   <div class="seg" id="side">
     <button data-s="L" class="on">左<small>Left</small></button>
@@ -368,6 +383,12 @@
   <div class="seg" id="grouping" style="display:none"></div>
   <div id="tree"></div>
 </div>
+
+<!-- セット登録。**いまの選択を名前を付けて覚え、押すと呼び戻す。**プレゼンで同じ
+     組み合わせを何度も見せるため。ブラウザ（localStorage）に保存する。
+     画面の下端の中央に置く（狭い画面では下のバーの 1 行目へ**移動**する） -->
+<div id="sets"><button id="setSave" type="button" disabled
+  title="いまの選択をセットとして登録">＋ セット登録</button></div>
 
 <!-- 狭い画面のときだけ出る下のバー。#mode と #posBlock は
      ここへ「移動」する（複製しない。2 つあると必ず片方が古くなる） -->
@@ -891,9 +912,9 @@ const NARROW = matchMedia('(max-width: 640px)');
 
    透かしすぎると周りの区切りが読めず、濃すぎると選んだ領域が隠れる。固定の
    正解が無いので `#ghost` で 0〜100% を動かせる。ここにあるのは初期値。 */
-/* **既定は 100%（何もしない）。**以前は機能的領域だけ 20% で透かし、他のアトラスは
-   選択外を明るさ 30% に落としていた。利用者の要望で、立体モードでは選択外を
-   そのまま見せる側を既定にした（2026-10-02）。下げたときの効き方は全アトラス共通。 */
+/* **既定は 100%（透かさない）。**周りは明るさ 30% に落とすだけで、選んだ領域が
+   光って見える。以前は機能的領域だけ既定 20% で透かしていた（2026-10-02 に変更）。
+   下げると半透明になる。効き方は全アトラス共通。 */
 const GHOST_DEFAULT = 1;
 /* **面の裏表では解決しない。**最初「裏面だけ描けば手前の壁が消える」と考えたが、
    視点が右にあるとき左半球のトラクトは反対側の半球の壁越しに見ることになる。
@@ -1611,9 +1632,10 @@ function applyFocus(){
     m.color.copy(m.userData.base);
     const off = sel.size && !sel.has(n);
     if (off && grey) m.color.copy(GREY_OFF);
-    /* 立体モードで 100% のときは落とさない（既定）。断面モードは従来どおり 30% に
-       落とす——あちらは切り口を見るモードで、濃さの操作子も無い。 */
-    else if (off && (ghost || state.mode !== 'solid')) m.color.multiplyScalar(ghost ? .75 : .3);
+    /* **100% でも周りは暗く落とす**（30%）。選んだ領域だけが光って見えるのは
+       これがあるから。いったん「100% は何もしない」にしたが、選んだものが周りと
+       見分けられなくなったので戻した（利用者の判断、2026-10-02）。 */
+    else if (off) m.color.multiplyScalar(ghost ? .75 : .3);
     /* 透かすときは色を落としすぎない。不透明度で既に暗くなるので、
        両方掛けると輪郭まで消えて脳の形が分からなくなる。 */
     /* **FrontSide にする。**皮質・皮質下・小脳は入れ子なので、DoubleSide のまま
@@ -1927,7 +1949,7 @@ const sameAsSel = st => st.atlas === state.atlas && st.names.length === sel.size
   && st.names.every(n => sel.has(n));
 
 function renderSets(){
-  for (const el of [...setsEl.querySelectorAll('.set,.x')]) el.remove();
+  for (const el of [...setsEl.querySelectorAll('.chip')]) el.remove();
   sets.forEach((st, i) => {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'set';
@@ -1944,8 +1966,10 @@ function renderSets(){
     x.type = 'button'; x.className = 'x'; x.textContent = '×';
     x.title = `「${st.name}」を消す`; x.setAttribute('aria-label', x.title);
     x.onclick = () => { sets.splice(i, 1); saveSets(); renderSets(); };
-    setsEl.insertBefore(b, setSaveBtn);
-    setsEl.insertBefore(x, setSaveBtn);
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.append(b, x);
+    setsEl.insertBefore(chip, setSaveBtn);
   });
   setSaveBtn.disabled = sel.size === 0;
 }
@@ -1960,7 +1984,7 @@ function defaultSetName(){
 
 setSaveBtn.onclick = () => {
   if (!sel.size) return;
-  const name = (prompt('セットの名前', defaultSetName()) ?? '').trim();
+  const name = (prompt('セット登録：名前を付けてください', defaultSetName()) ?? '').trim();
   if (!name) return;                                   // 取り消したら何もしない
   sets.push({ name, atlas: state.atlas, names: [...sel] });
   saveSets(); renderSets();
@@ -2364,7 +2388,7 @@ const hideLine = ls => { for (const l of ls) l.style.display = 'none'; };
 /* パネルを置いてはいけない矩形。UI のパネルは畳み方や画面幅で動くので毎回読む。 */
 function uiRects(){
   const out = [];
-  for (const id of ['list', 'panel', 'note', 'bar']) {
+  for (const id of ['list', 'panel', 'note', 'bar', 'sets']) {
     const el = document.getElementById(id);
     if (el && el.offsetHeight) out.push(el.getBoundingClientRect());
   }
@@ -2898,8 +2922,9 @@ function relayout(){
   if (narrow) {
     document.getElementById('barMode').appendChild(takeHome(modeEl));
     panelEl.appendChild(takeHome(noteEl));        // 設定シートの末尾へ
+    barEl.insertBefore(takeHome(setsEl), barEl.firstChild);   // セット登録はバーの 1 行目
   } else if (homes.size) {
-    goHome(modeEl); goHome(noteEl);
+    goHome(modeEl); goHome(noteEl); goHome(setsEl);
   }
   placePos();
   if (!narrow) closeSheets();
