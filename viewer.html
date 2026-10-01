@@ -351,8 +351,8 @@
        アトラスの下に置いていたときは、断面モードでも出て何も起きなかった。 -->
   <!-- 背景の脳の濃さ。**トラクトでだけ出る**（背景を敷くのはトラクトだけ） -->
   <div id="bdBlock" style="display:none">
-    <div class="lbl row"><span>背景の脳の濃さ</span><span class="val" id="bv">35%</span></div>
-    <input type="range" id="bdOp" min="0" max="100" step="1" value="35">
+    <div class="lbl row"><span>背景の脳の濃さ</span><span class="val" id="bv">20%</span></div>
+    <input type="range" id="bdOp" min="0" max="100" step="1" value="20">
   </div>
   <div id="ghostBlock">
     <div class="lbl row"><span>選択外の濃さ</span><span class="val" id="gv">100%</span></div>
@@ -1230,16 +1230,14 @@ async function ensureModel(atlas){
    トラクトとのコントラストを食う。色が付いているのは「選んだトラクト」だけ、
    という状態にする。 */
 const GHOST_COLOR = 0xaebdd6;
-/* トラクトの背景。**こちらは動かさない。**弓状束を出して見比べて決めた値で、
+/* トラクトの背景。弓状束を出して見比べて決めた値で、
    0.42 では束が完全に隠れ、0.16 では形が読めず、0.10 で形がはっきり出た。
    選択の透かし（`state.ghost`）とは役割が違うので、同じつまみに繋がない。 */
 /* 0.10 から 0.20 へ。**内側の層を落としたぶん濃くできる。**全部の層を出したまま
    濃くすると、入れ子の面が重なって脳が乳白色の靄になるだけで、形は読めない
-   （0.25 / 0.40 で実測した）。
-   0.20 から 0.35 へ。**手前の 1 枚だけを描くようにしたので、さらに濃くできる**
-   （PREPASS_ORDER の注釈）。20 / 35 / 50% を撮って比べ、脳回が読めてトラクトも
-   鮮やかに残る 35% にした。`#bdOp` で動かせる。 */
-const GHOST_OPACITY = 0.35;
+   （0.25 / 0.40 で実測した）。これは初期値で、`#bdOp` で動かせる。
+   **手前の 1 枚だけを描く案（深度の分身）は試して戻した**（DECISIONS 55）。 */
+const GHOST_OPACITY = 0.20;
 /* ネットワークで選択外を潰す灰色。**色オブジェクトで持つ。**`setHex().multiplyScalar()`
    だと sRGB からの変換が挟まるので、`getHex()` で読み返しても同じ値にならず、
    検査から見分けが付かない。 */
@@ -1248,33 +1246,7 @@ let backdropAtlas = null;
 /* 背景の濃さ。**利用者が `#bdOp` で動かせる。**初期値は GHOST_OPACITY */
 let backdropOpacity = GHOST_OPACITY;
 
-/* **背景は手前の 1 枚だけを描く。**透かした面は、視線が貫く枚数ぶん重なる。
-   外殻だけにしても、反対側の半球の内側面や奥の脳回が透けて見え、回しても
-   どちらが手前か読めなかった（利用者の指摘、2026-10-02）。
-
-   先に深度だけを書く（色は書かない）分身を描き、そのあと色の面を LessEqual で
-   重ねる。すると深度で勝つ手前の 1 枚しか色が乗らない。トラクトは不透明キューで
-   **その前に**描いてあるので、手前の 1 枚越しに見える。参照断面（renderOrder 2・3）
-   も分身（10）より先に描く。後に描くと、脳の表面より奥にあるので丸ごと消える。 */
-const PREPASS_ORDER = 10;
-const prepassMat = new THREE.MeshBasicMaterial({
-  colorWrite: false, depthWrite: true, transparent: true, side: THREE.FrontSide,
-  /* 同じ形を 2 回描くので、分身をわずかに奥へずらす。揃えたままだと色の面が
-     深度で負ける画素がまだらに出る */
-  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
-});
-function prepassOf(o){
-  if (!o.userData.prepass) {
-    const p = new THREE.Mesh(o.geometry, prepassMat);
-    p.renderOrder = PREPASS_ORDER;
-    p.raycast = () => {};                 // レイには当てない（見た目だけの分身）
-    o.add(p);
-    o.userData.prepass = p;
-  }
-  return o.userData.prepass;
-}
-
-/* 背景の濃さを当てる。0% は消す（分身も一緒に消える） */
+/* 背景の濃さを当てる。0% は消す */
 function applyBackdropOpacity(){
   const m = backdropAtlas && models.get(backdropAtlas);
   if (!m) return;
@@ -1292,12 +1264,6 @@ function setBackdrop(atlas){
       if (x.userData.base) x.color.copy(x.userData.base);   // 色も戻す
       x.userData.ghost = false; x.needsUpdate = true;
     });
-    /* 分身は**取り外す**（隠すだけにしない）。子として残すと、そのアトラスを
-       選んだときのレイや描画の走査に毎回混ざる */
-    for (const [, o] of m.meshByName) {
-      if (o.userData.prepass) { o.remove(o.userData.prepass); delete o.userData.prepass; }
-      o.renderOrder = 0;
-    }
     if (backdropAtlas !== state.atlas) m.root.visible = false;
   }
   backdropAtlas = null;
@@ -1316,11 +1282,7 @@ function setBackdrop(atlas){
      そのアトラスを選び直した時点で applyVisibility が出し直す。 */
   const skip = ATLASES[state.atlas] && ATLASES[state.atlas].backdropSkip;
   m.root.visible = true;
-  for (const [name, o] of m.meshByName) {
-    o.visible = !(skip && skip.test(name));
-    prepassOf(o).visible = true;
-    o.renderOrder = PREPASS_ORDER + 1;    // 色の面は分身のあと
-  }
+  for (const [name, o] of m.meshByName) o.visible = !(skip && skip.test(name));
   backdropAtlas = atlas;
   applyBackdropOpacity();
 }
@@ -2481,9 +2443,7 @@ function leadDepth(on){
 
 function resetLeads(){ leadN = 0; leadHaloN = 0; leadCoreN = 0; leadScreen.length = 0; }
 function commitLeads(){
-  /* 背景を敷いているとき（トラクト）は切る。背景は手前の面の深度を書くので、
-     脳の中を走る線維への線が表面で止まってしまう */
-  leadDepth(state.mode === 'solid' && !backdropAtlas);
+  leadDepth(state.mode === 'solid');
   leadCore.geometry.setDrawRange(0, leadCoreN * 2);
   leadHalo.geometry.setDrawRange(0, leadHaloN * 2);
   leadCore.geometry.attributes.position.needsUpdate = true;
@@ -3089,9 +3049,6 @@ window.__ghost = (opt = {}) => {
     if (opt.hide !== undefined) x.visible = !opt.hide;
     x.needsUpdate = true;
   });
-  // 手前の 1 枚だけにする仕組み（深度の分身）を切って見比べる
-  if (opt.prepass !== undefined)
-    for (const [, o] of m.meshByName) if (o.userData.prepass) o.userData.prepass.visible = !!opt.prepass;
   return `${m.mats.length} mats  side=${opt.side || '(据置)'} opacity=${opt.opacity ?? '(据置)'}`;
 };
 
@@ -3176,9 +3133,6 @@ window.__state = () => ({
      戻したことを数で確かめられるようにしておく。 */
   backdrop: backdropAtlas,
   backdropOpacity,
-  /* 手前の 1 枚だけを描くための深度の分身。背景を敷いている間だけ出ている */
-  backdropPrepass: [...models.values()].reduce((n, m) => n +
-    [...m.meshByName.values()].filter(o => o.userData.prepass && o.userData.prepass.visible).length, 0),
   /* 背景に濃く塗った面が無いこと。繋ぐ皮質領域を一緒に出す機能を外したので、
      色が付いているのは選んだトラクトだけ（docs/archive/tract-connects.md）。 */
   backdropPainted: (() => {
