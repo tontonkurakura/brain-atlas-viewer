@@ -317,6 +317,12 @@
     <input type="range" id="ghost" min="0" max="100" step="1" value="20">
   </div>
   </div>
+
+  <!-- 選んだ領域の札・引き出し線・凡例を出すか。**断面と立体の両方に効く**ので
+       #sliceCtl / #solidCtl の外に置く。切ると、選んだ領域が光っているだけの
+       図になる。選択そのもの（一覧の印・件数・光り方）は変えない。 -->
+  <div class="lbl">選択の表示</div>
+  <div class="seg"><button id="cTips" class="on">名前と引き出し線</button></div>
 </div>
 
 <div id="list">
@@ -920,6 +926,7 @@ const state = { plane: (Q.get('plane')||'axial'), mode: (Q.get('mode')||'slice')
                 half:'both', scope:'all',          // 立体モードの見せ方
                 ref:'none',                        // 立体モードで立てる参照断面
                 overlay:true, cut:true,            // 重ね方（操作子の状態）
+                tips: Q.get('tips') !== '0',       // 選択の札・引き出し線・凡例を出すか
                 world:{x:0,y:0,z:0}, clip:true };  // clip は cut の実効値
 
 /* Glasser は皮質だけのアトラスなので、皮質以外は DKT と同じ見出しで並べる。
@@ -1301,6 +1308,13 @@ cLabelBtn.onclick = ()=>{
   labMesh.visible = state.overlay;
 };
 cClipBtn.onclick = ()=>{ state.cut = !state.cut; applyMode(); };
+/* 札を消す。毎フレームの layoutCallouts が state.tips を見るので、ここでは状態だけ変える */
+const cTipsBtn = document.getElementById('cTips');
+cTipsBtn.classList.toggle('on', state.tips);
+cTipsBtn.onclick = ()=>{
+  state.tips = !state.tips;
+  cTipsBtn.classList.toggle('on', state.tips);
+};
 
 /* 皮質とみなすもの。大脳白質も一緒に隠す。皮質だけ消すと白い殻が残り、
    結局その中の皮質下構造が見えない。 */
@@ -2495,7 +2509,12 @@ function layoutCallouts(){
   const many = reps.length > SEL_TIPS_MAX;
   let avoid = null;
   resetLeads();
-  if (many) {
+  if (!state.tips) {
+    /* 札を切っているときは凡例も出さない。図として撮るための状態で、
+       選んだ領域が光っていることだけが見えればよい。ホバーのパネルは下で別に扱う */
+    hideSelPanels();
+    hideLegend();
+  } else if (many) {
     hideSelPanels();
     avoid = layoutLegend(reps);
   } else {
@@ -2896,6 +2915,7 @@ window.__state = () => ({
   /* 札を絞っているか。選択の数に上限は無いので、**溢れたときにどう振る舞うか**を
      見る（札 1 枚 + 一覧の印、が期待する姿）。 */
   tipsCapped: selGroups().length > SEL_TIPS_MAX,
+  tips: state.tips,
   /* 引き出し線。**3D の線なので SVG からは数えられない。**画面座標に直したものを
      渡して、パネルの下辺から出ているか・交差していないかを検査できるようにする。 */
   leads: leadScreen.slice(0, leadN).map(a => a.map(v => +v.toFixed(1))),
