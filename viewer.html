@@ -16,6 +16,8 @@
     padding:13px 15px;backdrop-filter:blur(4px);font-size:13px}
   .lbl{font-size:12px;color:#93a6cf;margin:11px 0 5px}
   .lbl:first-child{margin-top:0}
+  /* ブロックの先頭の見出しは上の規則で余白が消えるので、ブロック側で持つ */
+  #ghostBlock{margin-top:11px}
   .seg{display:flex;gap:6px}
   /* アトラスが 5 つになって 1 行に入らなくなった。**縮めずに折り返す。**
      flex:1 のまま詰めると、いちばん長い「血管支配」がボタンの中で 2 行に折れ、
@@ -157,6 +159,18 @@
     color:#cfe0ff;background:#25314c;border:1px solid #3b4a6b;border-radius:5px;padding:2px 7px}
   #selAll:hover,#clearSel:hover{background:#2f3d5e}
   #selAll{margin-left:auto}
+  /* セット。選択をまとめて覚えておき、押すと呼び戻す（プレゼン用） */
+  #sets{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}
+  #sets button{cursor:pointer;font:inherit;font-size:11.5px;color:#cfe0ff;background:#1b2438;
+    border:1px solid #3b4a6b;border-radius:5px;padding:2px 7px;max-width:100%;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #sets button:hover{background:#2f3d5e}
+  #sets button.on{background:#2a6fd6;border-color:#2a6fd6;color:#fff}
+  #sets button small{color:#8b9dc0;font-size:10px;margin-left:4px}
+  #sets button.on small{color:#dbe7ff}
+  #sets .x{color:#8b9dc0;padding:2px 5px}
+  #sets #setSave{border-style:dashed;background:none}
+  #sets #setSave:disabled{opacity:.4;cursor:default}
   #clearSel{display:none}
   #clearSel.on{display:inline-block}
   #load{position:fixed;inset:0;display:grid;place-items:center;background:#0a0d14;z-index:100;
@@ -313,8 +327,8 @@
   <!-- 選択していない領域の濃さ。**立体モードで選択中にだけ効く**ので、ここに置く。
        アトラスの下に置いていたときは、断面モードでも出て何も起きなかった。 -->
   <div id="ghostBlock">
-    <div class="lbl row"><span>選択外の濃さ</span><span class="val" id="gv">20%</span></div>
-    <input type="range" id="ghost" min="0" max="100" step="1" value="20">
+    <div class="lbl row"><span>選択外の濃さ</span><span class="val" id="gv">100%</span></div>
+    <input type="range" id="ghost" min="0" max="100" step="1" value="100">
   </div>
   </div>
 
@@ -342,6 +356,9 @@
   <div class="lbl" style="margin:11px 0 4px;display:flex;align-items:center;gap:6px">領域<button
     id="selAll" type="button">全部選ぶ</button><button
     id="clearSel" type="button">選択を解除</button></div>
+  <!-- セット。**いまの選択を名前を付けて覚え、押すと呼び戻す。**プレゼンで同じ
+       組み合わせを何度も見せるため。ブラウザ（localStorage）に保存する -->
+  <div id="sets"><button id="setSave" type="button" disabled>＋ いまの選択をセットに</button></div>
   <!-- 左右はここで切り替える。一覧の中では「左」「右」を頭に付けない -->
   <div class="seg" id="side">
     <button data-s="L" class="on">左<small>Left</small></button>
@@ -874,7 +891,10 @@ const NARROW = matchMedia('(max-width: 640px)');
 
    透かしすぎると周りの区切りが読めず、濃すぎると選んだ領域が隠れる。固定の
    正解が無いので `#ghost` で 0〜100% を動かせる。ここにあるのは初期値。 */
-const GHOST_DEFAULT = 0.20;
+/* **既定は 100%（何もしない）。**以前は機能的領域だけ 20% で透かし、他のアトラスは
+   選択外を明るさ 30% に落としていた。利用者の要望で、立体モードでは選択外を
+   そのまま見せる側を既定にした（2026-10-02）。下げたときの効き方は全アトラス共通。 */
+const GHOST_DEFAULT = 1;
 /* **面の裏表では解決しない。**最初「裏面だけ描けば手前の壁が消える」と考えたが、
    視点が右にあるとき左半球のトラクトは反対側の半球の壁越しに見ることになる。
    どちらの面を残しても、間に 1 枚以上入る。
@@ -894,9 +914,12 @@ function refOn(){
       && !!(ATLASES[state.atlas] && ATLASES[state.atlas].refSlice);
 }
 
-/* 透かしが効くアトラスか。効かないところでは操作子も出さない */
+/* 透かしが効くアトラスか。効かないところでは操作子も出さない。
+   **線維以外の全アトラス。**以前は機能的領域（focusGhost）だけだったが、既定を
+   100% にしたので、他のアトラスでも下げられないと元の見え方に戻せない。
+   線維は「選択＝表示」で、選択外はそもそも出ていない。 */
 function ghostAtlas(){
-  return !!(ATLASES[state.atlas] && ATLASES[state.atlas].focusGhost);
+  return !!(ATLASES[state.atlas] && !ATLASES[state.atlas].tracts);
 }
 
 /* 選択外を灰色に潰すか。**ネットワークだけ。**7 つの塊はどれも強い色を持って
@@ -908,11 +931,11 @@ function greyAtlas(){
   return !!(ATLASES[state.atlas] && ATLASES[state.atlas].focusGrey);
 }
 
-/* **濃さはアトラスごとに覚える。**機能的領域は脳溝の内側や内側面の区分を
-   透かして見つけるので薄く（20%）、ネットワークは脳の形を残したまま塊を
-   目立たせたいので濃い（75%）。同じ値を共有すると、系統を切り替えるたびに
-   どちらかが使いものにならない。利用者がつまみを動かしたら、その値を
-   そのアトラスのものとして覚える。 */
+/* **濃さはアトラスごとに覚える。**既定はどれも 100%（GHOST_DEFAULT）だが、
+   機能的領域は脳溝の内側を探すので薄く、ネットワークは脳の形を残したいので濃く
+   使う。同じ値を共有すると、系統を切り替えるたびにどちらかが使いものにならない。
+   利用者がつまみを動かしたら、その値をそのアトラスのものとして覚える。
+   アトラスごとに既定を変えたいときは ATLASES[...].ghostDefault で宣言できる。 */
 const ghostBy = new Map();
 function ghostOf(a){
   if (!ghostBy.has(a))
@@ -977,7 +1000,7 @@ const ATLASES = {
   /* ネットワーク。アトラスのボタンには出さない（機能的領域の「系統」から入る）。
      配色は Yeo 2011 の慣例に合わせてあるので、色だけで読める。 */
   network: { name:'機能的領域（ネットワーク）', model:'brain_network.glb',
-             hidden:true, focusGhost:true, focusGrey:true, ghostDefault:0.75,
+             hidden:true, focusGhost:true, focusGrey:true,
              pair:'glasser', pairLabel:['皮質区分','ネットワーク'], pairOn:1,
              groups:['ネットワーク', ...GLASSER_SUB] },
   /* 白質線維。**このアトラスだけ性質が違う。**
@@ -1588,7 +1611,9 @@ function applyFocus(){
     m.color.copy(m.userData.base);
     const off = sel.size && !sel.has(n);
     if (off && grey) m.color.copy(GREY_OFF);
-    else if (off) m.color.multiplyScalar(ghost ? .75 : .3);
+    /* 立体モードで 100% のときは落とさない（既定）。断面モードは従来どおり 30% に
+       落とす——あちらは切り口を見るモードで、濃さの操作子も無い。 */
+    else if (off && (ghost || state.mode !== 'solid')) m.color.multiplyScalar(ghost ? .75 : .3);
     /* 透かすときは色を落としすぎない。不透明度で既に暗くなるので、
        両方掛けると輪郭まで消えて脳の形が分からなくなる。 */
     /* **FrontSide にする。**皮質・皮質下・小脳は入れ子なので、DoubleSide のまま
@@ -1698,6 +1723,9 @@ function syncGhostUI(){
 
 function syncSelUI(){
   syncGhostUI();
+  /* セットの点灯を追従させる。**直接呼ばない**——セットの const はこれより後ろで
+     宣言するので、初期化中に呼ばれると TDZ に落ちる。イベントで疎に繋ぐ */
+  document.dispatchEvent(new Event('setsync'));
   for (const [n, el] of itemByName) el.classList.toggle('on', sel.has(n));
   syncGroupUI();
   clearBtn.classList.toggle('on', sel.size > 0);
@@ -1868,8 +1896,88 @@ function syncAtlasUI(){
     ? ATLASES[state.atlas].pair : state.atlas;
   document.querySelectorAll('#atlas button').forEach(
     b => b.classList.toggle('on', b.dataset.a === cur));
+  document.dispatchEvent(new Event('setsync'));   // セットのアトラス名の添え書きが変わる
 }
 syncAtlasUI();
+
+/* ───────────── セット ─────────────
+   選択の組み合わせに名前を付けて覚えておき、押すとそのまま呼び戻す。
+   プレゼンで同じ組み合わせを何度も見せるときに、一覧を押し直さずに済むように。
+
+   * 覚えるのは**アトラスと選択だけ**。モードや視点は含めない（呼び戻した先で
+     見せ方を変えられるほうが使いやすい）
+   * 保存先はブラウザの localStorage。**この端末・このブラウザでだけ残る。**
+     読めない環境（プライベートウィンドウ等）では、ページを開いている間だけ持つ
+   * 呼び戻すときは選択を**置き換える**（足し合わせない）。別のアトラスのセットなら
+     先にアトラスを切り替える */
+const SETS_KEY = 'neuroatlas.sets';
+const setsEl = document.getElementById('sets');
+const setSaveBtn = document.getElementById('setSave');
+let sets = [];
+try { sets = JSON.parse(localStorage.getItem(SETS_KEY) || '[]'); } catch (e) { sets = []; }
+if (!Array.isArray(sets)) sets = [];
+const saveSets = () => { try { localStorage.setItem(SETS_KEY, JSON.stringify(sets)); } catch (e) {} };
+/* アトラスの短い名前。ボタンと同じ呼び方にする（ネットワークはボタンに無いので足す） */
+const atlasShort = a => {
+  const b = document.querySelector(`#atlas button[data-a="${a}"]`);
+  return b ? b.textContent.trim() : (a === 'network' ? 'ネットワーク' : a);
+};
+/* いまの選択とセットが同じか。点くのは中身が一致しているときだけ */
+const sameAsSel = st => st.atlas === state.atlas && st.names.length === sel.size
+  && st.names.every(n => sel.has(n));
+
+function renderSets(){
+  for (const el of [...setsEl.querySelectorAll('.set,.x')]) el.remove();
+  sets.forEach((st, i) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'set';
+    b.title = `${st.name}（${atlasShort(st.atlas)}・${st.names.length} 領域）`;
+    b.textContent = st.name;
+    /* 別のアトラスのセットにだけ、どのアトラスかを添える */
+    if (st.atlas !== state.atlas) {
+      const sm = document.createElement('small'); sm.textContent = atlasShort(st.atlas);
+      b.appendChild(sm);
+    }
+    b.classList.toggle('on', sameAsSel(st));
+    b.onclick = () => recallSet(i);
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'x'; x.textContent = '×';
+    x.title = `「${st.name}」を消す`; x.setAttribute('aria-label', x.title);
+    x.onclick = () => { sets.splice(i, 1); saveSets(); renderSets(); };
+    setsEl.insertBefore(b, setSaveBtn);
+    setsEl.insertBefore(x, setSaveBtn);
+  });
+  setSaveBtn.disabled = sel.size === 0;
+}
+
+/* 既定の名前は、**最初に押した** 1 つ + 件数（一覧の順だと、押した覚えのない
+   ものが名前になる） */
+function defaultSetName(){
+  const reps = selGroups();
+  const head = reps.length ? (labels[reps[0]] && labels[reps[0]].ja) || reps[0] : '';
+  return reps.length > 1 ? `${head} ほか ${reps.length - 1}` : head;
+}
+
+setSaveBtn.onclick = () => {
+  if (!sel.size) return;
+  const name = (prompt('セットの名前', defaultSetName()) ?? '').trim();
+  if (!name) return;                                   // 取り消したら何もしない
+  sets.push({ name, atlas: state.atlas, names: [...sel] });
+  saveSets(); renderSets();
+};
+
+async function recallSet(i){
+  const st = sets[i];
+  if (!st || switching) return;
+  if (st.atlas !== state.atlas) await setAtlas(st.atlas);
+  if (st.atlas !== state.atlas) return;                // 切り替えられなかった
+  clearSelection();
+  /* いまのモデルに無い名前は落とす（資産を作り直して名前が変わった場合） */
+  setSelMany(st.names.filter(n => meshByName.has(n)), true);
+  renderSets();
+}
+renderSets();
+document.addEventListener('setsync', renderSets);
 
 /* ライセンスと注意事項。モーダルは Escape と外側の押下でも閉じる。
    Escape は開いているときだけモーダルに使う（普段は選択の解除）。 */
@@ -2890,6 +2998,10 @@ window.__state = () => ({
     : 0,
   focusGhost: meshByName
     ? [...meshByName].filter(([n, o]) => !sel.has(n) && o.material.opacity < 1).length : 0,
+  /* 選択外を暗く落としている数。**立体モードの既定（100%）では 0。** */
+  dimmedOff: meshByName
+    ? [...meshByName].filter(([n, o]) => !sel.has(n) && o.material.userData.base
+        && !o.material.color.equals(o.material.userData.base)).length : 0,
   camDist: +camera.position.distanceTo(controls.target).toFixed(2),
   shown: [...meshByName.values()].filter(o => o.visible).length,
   /* 背景（トラクトグラフィーで薄く敷く解剖のモデル）。借りたマテリアルを
@@ -2916,6 +3028,7 @@ window.__state = () => ({
      見る（札 1 枚 + 一覧の印、が期待する姿）。 */
   tipsCapped: selGroups().length > SEL_TIPS_MAX,
   tips: state.tips,
+  sets: sets.map(st => ({ name: st.name, atlas: st.atlas, n: st.names.length })),
   /* 引き出し線。**3D の線なので SVG からは数えられない。**画面座標に直したものを
      渡して、パネルの下辺から出ているか・交差していないかを検査できるようにする。 */
   leads: leadScreen.slice(0, leadN).map(a => a.map(v => +v.toFixed(1))),
